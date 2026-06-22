@@ -28,7 +28,7 @@ const MODULES = [
   { id: "habitos", label: "Hábitos diários", icon: "checklist", active: false, section: "modules" },
   { id: "momentos", label: "Momentos diários", icon: "photo", active: false, section: "modules" },
   { id: "proposito", label: "Propósito de vida", icon: "compass", active: false, section: "modules" },
-  { id: "exercicios", label: "Exercícios físicos", icon: "run", active: false, section: "modules" },
+  { id: "exercicios", label: "Exercícios físicos", icon: "run", active: true, section: "modules" },
   { id: "anotacoes", label: "Anotações", icon: "notebook", active: false, section: "modules" },
   { id: "agenda", label: "Agenda", icon: "calendar", active: false, section: "modules" }
 ];
@@ -38,6 +38,9 @@ let state = {
   registrosSono: [],
   registrosCelular: [],
   livros: [],
+  exercicios: [],
+  bioimpedancia: [],
+  pesos: [],
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -99,15 +102,59 @@ async function loadData(){
       }
     }
 
+    const exerciciosJaCarregado = parametrosSalvos && parametrosSalvos.carga_exercicios_feita;
+    const bioJaCarregado = parametrosSalvos && parametrosSalvos.carga_bio_feita;
+
+    if (!exerciciosJaCarregado) {
+      const contagem = await DB.contarRegistrosExtra();
+      if (contagem.exercicios === 0) {
+        const exerciciosInicial = EXERCICIOS_IMPORT.map(function(a){
+          return { data: a[0], tipo: a[1], duracaoHoras: a[2], passos: a[3], minutosAtivo: a[4], notas: "", importado: true };
+        });
+        const ok = await DB.bulkInsertExercicios(exerciciosInicial);
+        if (ok) await DB.setParametro("carga_exercicios_feita", true);
+      } else {
+        await DB.setParametro("carga_exercicios_feita", true);
+      }
+    }
+
+    if (!bioJaCarregado) {
+      const contagem = await DB.contarRegistrosExtra();
+      if (contagem.bioimpedancia === 0) {
+        const ok = await DB.upsertBioimpedancia(Object.assign({
+          dataMedicao: BIOIMPEDANCIA_INICIAL.data_medicao, idade: BIOIMPEDANCIA_INICIAL.idade, alturaCm: BIOIMPEDANCIA_INICIAL.altura_cm,
+          pontuacaoSaude: BIOIMPEDANCIA_INICIAL.pontuacao_saude, pesoKg: BIOIMPEDANCIA_INICIAL.peso_kg,
+          aguaCorporalKg: BIOIMPEDANCIA_INICIAL.agua_corporal_kg, massaProteicaKg: BIOIMPEDANCIA_INICIAL.massa_proteica_kg,
+          mineraisKg: BIOIMPEDANCIA_INICIAL.minerais_kg, massaGordaKg: BIOIMPEDANCIA_INICIAL.massa_gorda_kg,
+          massaMuscularEsqueleticaKg: BIOIMPEDANCIA_INICIAL.massa_muscular_esqueletica_kg, imc: BIOIMPEDANCIA_INICIAL.imc,
+          relacaoGorduraPct: BIOIMPEDANCIA_INICIAL.relacao_gordura_pct, adiposidadeNivel: BIOIMPEDANCIA_INICIAL.adiposidade_nivel,
+          tipoCorpo: BIOIMPEDANCIA_INICIAL.tipo_corpo, massaLivreGorduraKg: BIOIMPEDANCIA_INICIAL.massa_livre_gordura_kg,
+          massaGorduraSubcutaneaKg: BIOIMPEDANCIA_INICIAL.massa_gordura_subcutanea_kg, idadeCorpo: BIOIMPEDANCIA_INICIAL.idade_corpo,
+          gorduraVisceral: BIOIMPEDANCIA_INICIAL.gordura_visceral, ingestaoCaloricaRecomendadaKcal: BIOIMPEDANCIA_INICIAL.ingestao_calorica_recomendada_kcal,
+          pesoPadraoKg: BIOIMPEDANCIA_INICIAL.peso_padrao_kg, controlePesoKg: BIOIMPEDANCIA_INICIAL.controle_peso_kg,
+          controleGorduraKg: BIOIMPEDANCIA_INICIAL.controle_gordura_kg, controleMuscularKg: BIOIMPEDANCIA_INICIAL.controle_muscular_kg,
+          bmrKcal: BIOIMPEDANCIA_INICIAL.bmr_kcal, origem: "relatorio"
+        }, {}));
+        if (ok) await DB.setParametro("carga_bio_feita", true);
+      } else {
+        await DB.setParametro("carga_bio_feita", true);
+      }
+    }
+
     parametrosSalvos = await DB.getParametros();
     if (parametrosSalvos && parametrosSalvos.gerais) {
       state.parametros = Object.assign({}, state.parametros, parametrosSalvos.gerais);
     }
 
-    const [sono, celular, livros] = await Promise.all([DB.getSono(), DB.getCelular(), DB.getLivros()]);
+    const [sono, celular, livros, exercicios, bioimpedancia, pesos] = await Promise.all([
+      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso()
+    ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
     state.livros = livros;
+    state.exercicios = exercicios;
+    state.bioimpedancia = bioimpedancia;
+    state.pesos = pesos;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -489,7 +536,7 @@ function moduleTile(m){
     habitos: "Hábitos diários e consistência ao longo do tempo.",
     momentos: "Um painel para registrar momentos do seu dia.",
     proposito: "Reflexões e direção de longo prazo.",
-    exercicios: "Futebol, natação, academia e passos diários.",
+    exercicios: "Bioimpedância, controle de peso, futebol, natação, academia e passos.",
     anotacoes: "Anotações com assistente para te ajudar a organizar.",
     agenda: "Sua agenda integrada à central."
   };
@@ -960,6 +1007,244 @@ function renderLeituras(){
     ) + '</div>';
 }
 
+// ---------- Módulo: Exercícios físicos (bioimpedância + peso + atividade) ----------
+
+function bioOrdenada(){ return [...state.bioimpedancia].sort((a,b)=>a.dataMedicao.localeCompare(b.dataMedicao)); }
+function bioMaisRecente(){ const l = bioOrdenada(); return l.length ? l[l.length-1] : null; }
+function bioAnterior(){ const l = bioOrdenada(); return l.length>1 ? l[l.length-2] : null; }
+
+function deltaTexto(atual, anterior, unidade, decimais){
+  if (atual===null || atual===undefined || anterior===null || anterior===undefined) return null;
+  const diff = atual - anterior;
+  if (Math.abs(diff) < (decimais===0?1:0.05)) return { type:"neutral", text:"sem alteração" };
+  const sinal = diff > 0 ? "+" : "";
+  return { type: diff>0?"up":"down", text: sinal+diff.toFixed(decimais!==undefined?decimais:1)+unidade+" vs. anterior" };
+}
+
+function renderBioimpedanciaCard(bio, anterior){
+  const dataFmt = new Date(bio.dataMedicao).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
+  const horaFmt = new Date(bio.dataMedicao).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+
+  function linha(label, valor, unidade, deltaAnt, decimais){
+    const delta = anterior ? deltaTexto(valor, deltaAnt, unidade, decimais) : null;
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">'+
+      '<span style="color:var(--text-dim);">'+label+'</span>'+
+      '<span style="display:flex;align-items:center;gap:8px;"><span style="font-family:var(--font-mono);font-weight:500;">'+(valor!==null&&valor!==undefined?valor+unidade:"—")+'</span>'+
+      (delta?'<span class="metric-delta '+delta.type+'" style="font-size:11px;">'+delta.text+'</span>':'')+'</span></div>';
+  }
+
+  return '<div class="card" style="margin-bottom:20px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">'+
+      '<div><p style="font-size:15px;font-weight:500;margin:0;">'+dataFmt+'</p><p style="font-size:12px;color:var(--text-dim);margin:2px 0 0;">'+horaFmt+' · '+(bio.tipoCorpo||"")+'</p></div>'+
+      '<div style="text-align:right;"><div style="font-family:var(--font-mono);font-size:22px;font-weight:500;">'+bio.pontuacaoSaude+'</div><div style="font-size:11px;color:var(--text-dim);">pontos de saúde</div></div>'+
+      '<button class="icon-btn" data-delbio="'+bio.id+'" aria-label="Excluir relatório">'+icon("trash")+'</button>'+
+    '</div>'+
+    '<div class="grid grid-2" style="gap:24px;margin-top:14px;">'+
+      '<div>'+
+        '<p style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;margin:0 0 4px;">Composição corporal</p>'+
+        linha("Peso", bio.pesoKg, "kg", anterior?anterior.pesoKg:null, 2) +
+        linha("Água corporal", bio.aguaCorporalKg, "kg", anterior?anterior.aguaCorporalKg:null, 1) +
+        linha("Massa proteica", bio.massaProteicaKg, "kg", anterior?anterior.massaProteicaKg:null, 1) +
+        linha("Minerais", bio.mineraisKg, "kg", anterior?anterior.mineraisKg:null, 1) +
+        linha("Massa gorda", bio.massaGordaKg, "kg", anterior?anterior.massaGordaKg:null, 1) +
+        linha("Massa muscular esquelética", bio.massaMuscularEsqueleticaKg, "kg", anterior?anterior.massaMuscularEsqueleticaKg:null, 1) +
+      '</div>'+
+      '<div>'+
+        '<p style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;margin:0 0 4px;">Obesidade e indicadores</p>'+
+        linha("IMC", bio.imc, "", anterior?anterior.imc:null, 1) +
+        linha("Relação de gordura", bio.relacaoGorduraPct, "%", anterior?anterior.relacaoGorduraPct:null, 1) +
+        linha("Adiposidade", bio.adiposidadeNivel, "", anterior?anterior.adiposidadeNivel:null, 0) +
+        linha("Gordura visceral", bio.gorduraVisceral, "", anterior?anterior.gorduraVisceral:null, 0) +
+        linha("Idade do corpo", bio.idadeCorpo, " anos", anterior?anterior.idadeCorpo:null, 0) +
+        linha("BMR", bio.bmrKcal, " kcal", anterior?anterior.bmrKcal:null, 0) +
+      '</div>'+
+    '</div>'+
+    '<div class="grid grid-2" style="gap:24px;margin-top:6px;">'+
+      '<div>'+
+        '<p style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 4px;">Outros indicadores</p>'+
+        linha("Massa livre de gordura", bio.massaLivreGorduraKg, "kg", anterior?anterior.massaLivreGorduraKg:null, 1) +
+        linha("Massa gordura subcutânea", bio.massaGorduraSubcutaneaKg, "kg", anterior?anterior.massaGorduraSubcutaneaKg:null, 1) +
+        linha("Ingestão calórica recomendada", bio.ingestaoCaloricaRecomendadaKcal, " kcal", anterior?anterior.ingestaoCaloricaRecomendadaKcal:null, 0) +
+      '</div>'+
+      '<div>'+
+        '<p style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 4px;">Controle de peso</p>'+
+        linha("Peso padrão", bio.pesoPadraoKg, "kg", null) +
+        linha("Controle de peso", bio.controlePesoKg, "kg", null) +
+        linha("Controle de gordura", bio.controleGorduraKg, "kg", null) +
+        linha("Controle muscular", bio.controleMuscularKg, "kg", null) +
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function gerarInsightsBioimpedancia(){
+  const lista = bioOrdenada();
+  if (!lista.length) return ["Nenhum relatório de bioimpedância importado ainda."];
+  const atual = lista[lista.length-1];
+  const insights = [];
+  if (atual.imc !== null) {
+    if (atual.imc >= 25) insights.push("Seu IMC atual ("+atual.imc.toFixed(1)+") está na faixa de sobrepeso/obesidade segundo a classificação padrão. O relatório aponta um controle de peso recomendado de "+(atual.controlePesoKg!==null?atual.controlePesoKg.toFixed(1):"—")+"kg para chegar ao peso padrão de "+(atual.pesoPadraoKg||"—")+"kg.");
+    else insights.push("Seu IMC atual ("+atual.imc.toFixed(1)+") está dentro da faixa considerada normal.");
+  }
+  if (atual.gorduraVisceral !== null && atual.gorduraVisceral >= 10) {
+    insights.push("Seu nível de gordura visceral ("+atual.gorduraVisceral+") está no limite/acima do recomendado. Gordura visceral elevada está associada a maior risco cardiometabólico — atividade aeróbica regular tende a reduzir esse indicador de forma mais eficaz que dieta isolada.");
+  }
+  if (lista.length >= 2) {
+    const ant = lista[lista.length-2];
+    const diffPeso = atual.pesoKg - ant.pesoKg;
+    const diffGordura = (atual.massaGordaKg||0) - (ant.massaGordaKg||0);
+    const diffMuscular = (atual.massaMuscularEsqueleticaKg||0) - (ant.massaMuscularEsqueleticaKg||0);
+    if (Math.abs(diffPeso) > 0.3) {
+      insights.push("Desde a última medição, seu peso "+(diffPeso>0?"subiu":"caiu")+" "+Math.abs(diffPeso).toFixed(1)+"kg. Nesse período, a massa gorda "+(diffGordura>0?"aumentou":"diminuiu")+" "+Math.abs(diffGordura).toFixed(1)+"kg e a massa muscular "+(diffMuscular>0?"aumentou":"diminuiu")+" "+Math.abs(diffMuscular).toFixed(1)+"kg.");
+    }
+  }
+  return insights;
+}
+
+function renderBioimpedanciaTab(){
+  const lista = bioOrdenada();
+  if (!lista.length) return '<div class="empty-state">Nenhum relatório de bioimpedância ainda. Envie a foto do relatório no chat para que seja importado.</div>';
+  const insights = gerarInsightsBioimpedancia();
+  const atual = lista[lista.length-1];
+  return '<div class="section-title" style="margin-top:0;">Análise assistida por IA</div>'+
+    insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
+    '<div class="chart-wrap" style="height:220px;margin-top:20px;"><canvas id="chartBioEvolucao" role="img" aria-label="Gráfico de evolução de peso e massa gorda ao longo das medições"></canvas></div>'+
+    '<div class="section-title">Histórico de relatórios</div>'+
+    [...lista].reverse().map(function(b, i){ return renderBioimpedanciaCard(b, lista[lista.length-2-i] || null); }).join("");
+}
+
+function renderRegistroPesoForm(){
+  const today = new Date().toISOString().slice(0,10);
+  return '<div class="form-grid">'+
+    field("Data", '<input type="date" id="fp-data" value="'+today+'" />') +
+    field("Peso (kg)", '<input type="number" id="fp-peso" min="30" max="250" step="0.1" placeholder="ex: 88.5" />') +
+    field("Observação (opcional)", '<textarea id="fp-notas" rows="2"></textarea>') +
+    '<button class="btn btn-primary" id="btn-salvar-peso">'+icon("check")+' Salvar peso</button>'+
+    '<div class="toast" id="msg-salvo-peso" style="display:none;">'+icon("check")+' Peso salvo</div></div>';
+}
+
+function renderHistoricoPeso(){
+  const lista = [...state.pesos].sort((a,b)=>b.data.localeCompare(a.data));
+  if (!lista.length) return '<div class="empty-state">Nenhum registro de peso ainda.</div>';
+  const bio = bioMaisRecente();
+  return lista.map(function(p, i){
+    const dataFmt = new Date(p.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
+    const anterior = lista[i+1];
+    const delta = anterior ? deltaTexto(p.pesoKg, anterior.pesoKg, "kg", 1) : null;
+    return '<div class="list-row"><div class="list-row-main"><div class="list-row-title">'+dataFmt+'</div>'+
+      (p.notas?'<div class="list-row-sub" style="font-family:var(--font-body);">'+p.notas+'</div>':'')+'</div>'+
+      '<div style="display:flex;align-items:center;gap:10px;">'+
+      (delta?'<span class="metric-delta '+delta.type+'" style="font-size:11.5px;">'+delta.text+'</span>':'')+
+      '<div class="badge badge-neutral" style="font-size:13px;">'+p.pesoKg.toFixed(1)+'kg</div></div>'+
+      '<button class="icon-btn" data-delpeso="'+p.id+'" aria-label="Excluir registro">'+icon("trash")+'</button></div>';
+  }).join("");
+}
+
+function renderAnalisePeso(){
+  const lista = [...state.pesos].sort((a,b)=>a.data.localeCompare(b.data));
+  const bio = bioMaisRecente();
+  if (!lista.length && !bio) return '<div class="empty-state">Nenhum dado de peso ainda.</div>';
+  const ultimoPeso = lista.length ? lista[lista.length-1].pesoKg : (bio?bio.pesoKg:null);
+  const primeiroPeso = lista.length ? lista[0].pesoKg : null;
+  const variacaoTotal = (ultimoPeso!==null && primeiroPeso!==null) ? ultimoPeso-primeiroPeso : null;
+  return '<div class="grid grid-3" style="margin-bottom:20px;">'+
+      metricCard("Peso atual", ultimoPeso!==null?ultimoPeso.toFixed(1)+"kg":"—") +
+      metricCard("Peso padrão (meta)", bio&&bio.pesoPadraoKg!==null?bio.pesoPadraoKg.toFixed(1)+"kg":"—") +
+      metricCard("Variação no período", variacaoTotal!==null?(variacaoTotal>=0?"+":"")+variacaoTotal.toFixed(1)+"kg":"—") +
+    '</div>'+
+    '<div class="chart-wrap" style="height:240px;"><canvas id="chartPesoEvolucao" role="img" aria-label="Gráfico de evolução do peso ao longo do tempo"></canvas></div>';
+}
+
+function renderPesoTab(){
+  if (!state.pesoTab) state.pesoTab = "registro";
+  const tabs = [{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"},{id:"analise",label:"Análises"}];
+  return tabsHtml(tabs, state.pesoTab, "pesotab") +
+    '<div id="peso-content">' + (
+      state.pesoTab==="registro" ? renderRegistroPesoForm() :
+      state.pesoTab==="historico" ? renderHistoricoPeso() : renderAnalisePeso()
+    ) + '</div>';
+}
+
+function renderRegistroExercicioForm(){
+  const today = new Date().toISOString().slice(0,10);
+  return '<div class="form-grid">'+
+    field("Data", '<input type="date" id="fe-data" value="'+today+'" />') +
+    field("Tipo de atividade", '<select id="fe-tipo"><option value="Academia">Academia</option><option value="Futebol">Futebol</option><option value="Natação">Natação</option><option value="Bike">Bike</option><option value="Corrida">Corrida</option><option value="Outro">Outro</option></select>') +
+    field("Duração (horas)", '<input type="number" id="fe-duracao" min="0" max="10" step="0.1" placeholder="ex: 1.0" />') +
+    field("Passos no dia (opcional)", '<input type="number" id="fe-passos" min="0" max="50000" />') +
+    field("Minutos ativo no dia (opcional)", '<input type="number" id="fe-ativo" min="0" max="1000" />') +
+    field("Observação", '<textarea id="fe-notas" rows="2"></textarea>') +
+    '<button class="btn btn-primary" id="btn-salvar-exercicio">'+icon("check")+' Salvar atividade</button>'+
+    '<div class="toast" id="msg-salvo-exercicio" style="display:none;">'+icon("check")+' Atividade salva</div></div>';
+}
+
+function renderHistoricoExercicios(){
+  const lista = [...state.exercicios].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,60);
+  if (!lista.length) return '<div class="empty-state">Nenhuma atividade registrada ainda.</div>';
+  return lista.map(function(e){
+    const dataFmt = new Date(e.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
+    const detalhes = [];
+    if (e.tipo) detalhes.push(e.tipo);
+    if (e.duracaoHoras) detalhes.push(fmtHoras(e.duracaoHoras));
+    if (e.passos) detalhes.push(e.passos.toLocaleString("pt-BR")+" passos");
+    if (e.minutosAtivo) detalhes.push(e.minutosAtivo+" min ativo");
+    return '<div class="list-row"><div class="list-row-main"><div class="list-row-title">'+dataFmt+'</div>'+
+      '<div class="list-row-sub" style="font-family:var(--font-body);">'+(detalhes.join(" · ")||"—")+'</div></div>'+
+      '<button class="icon-btn" data-delexercicio="'+e.id+'" aria-label="Excluir atividade">'+icon("trash")+'</button></div>';
+  }).join("");
+}
+
+function renderAnaliseExercicios(){
+  const lista = state.exercicios;
+  if (!lista.length) return '<div class="empty-state">Nenhum dado ainda.</div>';
+  const ultimos30 = lista.filter(function(e){
+    const d = new Date(e.data+"T00:00:00");
+    return (new Date() - d) <= 30*24*3600*1000;
+  });
+  const porTipo = {};
+  ultimos30.forEach(function(e){ if (e.tipo) porTipo[e.tipo] = (porTipo[e.tipo]||0)+1; });
+  const diasComAtividade = new Set(ultimos30.filter(e=>e.tipo).map(e=>e.data)).size;
+  const totalPassos = lista.filter(e=>e.passos).slice(-30);
+  const mediaPassos = totalPassos.length ? Math.round(avg(totalPassos.map(e=>e.passos))) : null;
+
+  const insights = [];
+  insights.push("Nos últimos 30 dias, você se exercitou em "+diasComAtividade+" dias.");
+  const tipoMaisFreq = Object.keys(porTipo).sort(function(a,b){ return porTipo[b]-porTipo[a]; })[0];
+  if (tipoMaisFreq) insights.push("Sua atividade mais frequente foi "+tipoMaisFreq+" ("+porTipo[tipoMaisFreq]+"x).");
+  if (mediaPassos) insights.push("Sua média de passos diários (últimos registros) é de "+mediaPassos.toLocaleString("pt-BR")+".");
+
+  return '<div class="grid grid-3" style="margin-bottom:20px;">'+
+      metricCard("Dias ativos (30d)", diasComAtividade) +
+      metricCard("Atividade mais frequente", tipoMaisFreq||"—") +
+      metricCard("Média de passos", mediaPassos!==null?mediaPassos.toLocaleString("pt-BR"):"—") +
+    '</div>'+
+    '<div class="chart-wrap" style="height:220px;"><canvas id="chartExerciciosTipo" role="img" aria-label="Gráfico de frequência por tipo de exercício"></canvas></div>'+
+    '<div class="section-title">Observações</div>'+
+    insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
+}
+
+function renderExerciciosTab(){
+  if (!state.exercicioTab) state.exercicioTab = "registro";
+  const tabs = [{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"},{id:"analise",label:"Análises"}];
+  return tabsHtml(tabs, state.exercicioTab, "exerciciotab") +
+    '<div id="exercicio-content">' + (
+      state.exercicioTab==="registro" ? renderRegistroExercicioForm() :
+      state.exercicioTab==="historico" ? renderHistoricoExercicios() : renderAnaliseExercicios()
+    ) + '</div>';
+}
+
+function renderExercicios(){
+  if (!state.exerciciosSecao) state.exerciciosSecao = "bioimpedancia";
+  const secoes = [{id:"bioimpedancia",label:"Bioimpedância"},{id:"peso",label:"Peso"},{id:"atividade",label:"Atividade física"}];
+  return backLink() +
+    '<div class="page-header"><div class="page-title">Exercícios físicos</div></div>'+
+    tabsHtml(secoes, state.exerciciosSecao, "exerciciosecao") +
+    '<div id="exercicios-content">' + (
+      state.exerciciosSecao==="bioimpedancia" ? renderBioimpedanciaTab() :
+      state.exerciciosSecao==="peso" ? renderPesoTab() : renderExerciciosTab()
+    ) + '</div>';
+}
+
 function renderAnalisesGerais(){
   const { insights, corrSonoCelular, corrScoreCelular, cruz } = gerarInsightsCruzados();
   const cruzValido = cruz.filter(c=>c.sono!==null);
@@ -993,6 +1278,12 @@ function render(){
   else if (state.view === "celular") { content.innerHTML = renderCelular(); if (state.celularTab==="analise") setTimeout(drawCelularChart,0); }
   else if (state.view === "leituras") { content.innerHTML = renderLeituras(); if (state.leiturasTab==="analise") setTimeout(drawLivrosChart,0); }
   else if (state.view === "analises") { content.innerHTML = renderAnalisesGerais(); setTimeout(drawCruzadoChart,0); }
+  else if (state.view === "exercicios") {
+    content.innerHTML = renderExercicios();
+    if (state.exerciciosSecao==="bioimpedancia") setTimeout(drawBioEvolucaoChart,0);
+    if (state.exerciciosSecao==="peso" && state.pesoTab==="analise") setTimeout(drawPesoEvolucaoChart,0);
+    if (state.exerciciosSecao==="atividade" && state.exercicioTab==="analise") setTimeout(drawExerciciosTipoChart,0);
+  }
   attachHandlers();
 }
 
@@ -1096,6 +1387,51 @@ function drawCruzadoChart(){
       y:Object.assign({ position:"left", min:4, max:11 },baseGridOpts()),
       y1:{ position:"right", min:0, max:5, grid:{drawOnChartArea:false}, ticks:{color:"#8A8FA3",font:{size:11}} }
     } } });
+}
+
+function drawBioEvolucaoChart(){
+  const lista = bioOrdenada();
+  if (lista.length < 2) return;
+  const labels = lista.map(b=>new Date(b.dataMedicao).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}));
+  const pesoVals = lista.map(b=>b.pesoKg);
+  const gordaVals = lista.map(b=>b.massaGordaKg);
+  const c = document.getElementById("chartBioEvolucao");
+  if (!c) return;
+  new Chart(c, { type:"line", data:{ labels:labels, datasets:[
+    { label:"Peso", data:pesoVals, borderColor:"#4D8FFF", backgroundColor:"rgba(77,143,255,0.08)", tension:0.3, pointRadius:3, fill:true },
+    { label:"Massa gorda", data:gordaVals, borderColor:"#F2685B", backgroundColor:"rgba(242,104,91,0.06)", tension:0.3, pointRadius:3, fill:false }
+  ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true, position:"bottom", labels:{color:"#8A8FA3",font:{size:11}}}},
+    scales:{ x:Object.assign({ticks:{color:"#8A8FA3",font:{size:10}}},{grid:{display:false}}), y:Object.assign({},baseGridOpts()) } } });
+}
+
+function drawPesoEvolucaoChart(){
+  const lista = [...state.pesos].sort((a,b)=>a.data.localeCompare(b.data));
+  const bio = bioMaisRecente();
+  if (!lista.length) return;
+  const labels = lista.map(p=>new Date(p.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}));
+  const valores = lista.map(p=>p.pesoKg);
+  const meta = bio ? bio.pesoPadraoKg : null;
+  const c = document.getElementById("chartPesoEvolucao");
+  if (!c) return;
+  const datasets = [{ label:"Peso", data:valores, borderColor:"#4D8FFF", backgroundColor:"rgba(77,143,255,0.1)", tension:0.3, pointRadius:3, fill:true }];
+  if (meta) datasets.push({ label:"Peso padrão", data:labels.map(()=>meta), borderColor:"#4ED9A0", borderDash:[6,4], pointRadius:0, fill:false });
+  new Chart(c, { type:"line", data:{ labels:labels, datasets:datasets }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+    scales:{ x:Object.assign({ticks:{color:"#8A8FA3",font:{size:10}}},{grid:{display:false}}), y:Object.assign({},baseGridOpts()) } } });
+}
+
+function drawExerciciosTipoChart(){
+  const lista = state.exercicios.filter(function(e){
+    const d = new Date(e.data+"T00:00:00");
+    return e.tipo && (new Date() - d) <= 90*24*3600*1000;
+  });
+  if (!lista.length) return;
+  const porTipo = {};
+  lista.forEach(function(e){ porTipo[e.tipo] = (porTipo[e.tipo]||0)+1; });
+  const labels = Object.keys(porTipo);
+  const valores = labels.map(function(l){ return porTipo[l]; });
+  const c = document.getElementById("chartExerciciosTipo");
+  if (!c) return;
+  new Chart(c, { type:"bar", data:{ labels:labels, datasets:[{ label:"Sessões (90d)", data:valores, backgroundColor:"#6C63FF", borderRadius:3 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:"#8A8FA3",font:{size:11}}}, y:Object.assign({beginAtZero:true},baseGridOpts()) } } });
 }
 
 function closeSidebarMobile(){
@@ -1257,6 +1593,61 @@ function attachHandlers(){
   if (menuBtn) menuBtn.addEventListener("click", function(){ document.getElementById("sidebar").classList.add("is-open"); document.getElementById("scrim").classList.add("is-open"); });
   const scrim = document.getElementById("scrim");
   if (scrim) scrim.addEventListener("click", closeSidebarMobile);
+
+  document.querySelectorAll("[data-exerciciosecao]").forEach(function(btn){ btn.addEventListener("click", function(){ state.exerciciosSecao = btn.getAttribute("data-exerciciosecao"); render(); }); });
+  document.querySelectorAll("[data-pesotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.pesoTab = btn.getAttribute("data-pesotab"); render(); }); });
+  document.querySelectorAll("[data-exerciciotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.exercicioTab = btn.getAttribute("data-exerciciotab"); render(); }); });
+
+  const btnSalvarPeso = document.getElementById("btn-salvar-peso");
+  if (btnSalvarPeso) btnSalvarPeso.addEventListener("click", async function(){
+    const dataVal = document.getElementById("fp-data").value;
+    const pesoVal = Number(document.getElementById("fp-peso").value);
+    if (!pesoVal) return;
+    btnSalvarPeso.disabled = true;
+    const salvo = await DB.upsertPeso({ data: dataVal, pesoKg: pesoVal, notas: document.getElementById("fp-notas").value });
+    if (salvo) state.pesos.push(salvo);
+    btnSalvarPeso.disabled = false;
+    const msg = document.getElementById("msg-salvo-peso");
+    if (msg) { msg.style.display="flex"; setTimeout(()=>{ if(msg) msg.style.display="none"; },2500); }
+  });
+  document.querySelectorAll("[data-delpeso]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delpeso");
+    await DB.deletePeso(id);
+    state.pesos = state.pesos.filter(p=>p.id!==id);
+    render();
+  }); });
+
+  const btnSalvarExercicio = document.getElementById("btn-salvar-exercicio");
+  if (btnSalvarExercicio) btnSalvarExercicio.addEventListener("click", async function(){
+    const reg = {
+      data: document.getElementById("fe-data").value,
+      tipo: document.getElementById("fe-tipo").value,
+      duracaoHoras: Number(document.getElementById("fe-duracao").value)||null,
+      passos: Number(document.getElementById("fe-passos").value)||null,
+      minutosAtivo: Number(document.getElementById("fe-ativo").value)||null,
+      notas: document.getElementById("fe-notas").value,
+      importado: false
+    };
+    btnSalvarExercicio.disabled = true;
+    const salvo = await DB.upsertExercicio(reg);
+    if (salvo) state.exercicios.push(salvo);
+    btnSalvarExercicio.disabled = false;
+    const msg = document.getElementById("msg-salvo-exercicio");
+    if (msg) { msg.style.display="flex"; setTimeout(()=>{ if(msg) msg.style.display="none"; },2500); }
+  });
+  document.querySelectorAll("[data-delexercicio]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delexercicio");
+    await DB.deleteExercicio(id);
+    state.exercicios = state.exercicios.filter(e=>e.id!==id);
+    render();
+  }); });
+
+  document.querySelectorAll("[data-delbio]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delbio");
+    await DB.deleteBioimpedancia(id);
+    state.bioimpedancia = state.bioimpedancia.filter(b=>b.id!==id);
+    render();
+  }); });
 }
 
 loadData();
