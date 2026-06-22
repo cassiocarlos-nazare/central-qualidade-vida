@@ -41,6 +41,7 @@ let state = {
   exercicios: [],
   bioimpedancia: [],
   pesos: [],
+  movimentacao: [],
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -108,13 +109,27 @@ async function loadData(){
     if (!exerciciosJaCarregado) {
       const contagem = await DB.contarRegistrosExtra();
       if (contagem.exercicios === 0) {
-        const exerciciosInicial = EXERCICIOS_IMPORT.map(function(a){
-          return { data: a[0], tipo: a[1], duracaoHoras: a[2], passos: a[3], minutosAtivo: a[4], notas: "", importado: true };
+        const exerciciosInicial = EXERCICIOS_IMPORT.filter(function(a){ return a[1]; }).map(function(a){
+          return { data: a[0], tipo: a[1], horaInicio: null, horaFim: null, notas: a[2]?("Duração aproximada: "+a[2]+"h"):"", importado: true };
         });
         const ok = await DB.bulkInsertExercicios(exerciciosInicial);
         if (ok) await DB.setParametro("carga_exercicios_feita", true);
       } else {
         await DB.setParametro("carga_exercicios_feita", true);
+      }
+    }
+
+    const movimentacaoJaCarregada = parametrosSalvos && parametrosSalvos.carga_movimentacao_feita;
+    if (!movimentacaoJaCarregada) {
+      const contagemMov = (await sb.from("movimentacao_diaria").select("id", { count: "exact", head: true })).count || 0;
+      if (contagemMov === 0) {
+        const movInicial = EXERCICIOS_IMPORT.filter(function(a){ return a[3]!==null || a[4]!==null; }).map(function(a){
+          return { data: a[0], minutosAtivo: a[4], passos: a[3], caloriasAtividade: null, caloriasTotais: null, distanciaKm: null };
+        });
+        for (const m of movInicial) { await DB.upsertMovimentacao(m); }
+        await DB.setParametro("carga_movimentacao_feita", true);
+      } else {
+        await DB.setParametro("carga_movimentacao_feita", true);
       }
     }
 
@@ -146,8 +161,8 @@ async function loadData(){
       state.parametros = Object.assign({}, state.parametros, parametrosSalvos.gerais);
     }
 
-    const [sono, celular, livros, exercicios, bioimpedancia, pesos] = await Promise.all([
-      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso()
+    const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao] = await Promise.all([
+      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -155,6 +170,7 @@ async function loadData(){
     state.exercicios = exercicios;
     state.bioimpedancia = bioimpedancia;
     state.pesos = pesos;
+    state.movimentacao = movimentacao;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -1012,6 +1028,7 @@ function renderLeituras(){
 function bioOrdenada(){ return [...state.bioimpedancia].sort((a,b)=>a.dataMedicao.localeCompare(b.dataMedicao)); }
 function bioMaisRecente(){ const l = bioOrdenada(); return l.length ? l[l.length-1] : null; }
 function bioAnterior(){ const l = bioOrdenada(); return l.length>1 ? l[l.length-2] : null; }
+function bioPrimeira(){ const l = bioOrdenada(); return l.length ? l[0] : null; }
 
 function deltaTexto(atual, anterior, unidade, decimais){
   if (atual===null || atual===undefined || anterior===null || anterior===undefined) return null;
@@ -1019,6 +1036,105 @@ function deltaTexto(atual, anterior, unidade, decimais){
   if (Math.abs(diff) < (decimais===0?1:0.05)) return { type:"neutral", text:"sem alteração" };
   const sinal = diff > 0 ? "+" : "";
   return { type: diff>0?"up":"down", text: sinal+diff.toFixed(decimais!==undefined?decimais:1)+unidade+" vs. anterior" };
+}
+
+// Classificação individual de cada indicador: positivo / padrão / negativo
+// Usa as faixas do próprio relatório da balança (pessoais) como referência
+// principal, complementadas por referências gerais conhecidas.
+const BIO_INDICADORES = [
+  { key: "imc", label: "IMC", unidade: "", decimais: 1,
+    classificar: function(v){ if (v===null) return null; if (v<18.5) return "atencao"; if (v<=24.9) return "positivo"; if (v<=29.9) return "atencao"; return "negativo"; },
+    desc: function(v,c){ return c==="positivo" ? "Dentro da faixa considerada normal (18.5–24.9)." : c==="atencao" ? (v<18.5?"Abaixo do peso normal.":"Faixa de sobrepeso (25–29.9) — vale atenção para não progredir.") : "Faixa de obesidade (30+) pela classificação padrão de IMC — recomenda-se acompanhamento."; } },
+  { key: "relacaoGorduraPct", label: "Relação de gordura", unidade: "%", decimais: 1,
+    classificar: function(v){ if (v===null) return null; if (v<=20) return "positivo"; if (v<=26.5) return "atencao"; return "negativo"; },
+    desc: function(v,c){ return c==="positivo" ? "Percentual de gordura corporal saudável." : c==="atencao" ? "Pouco acima da faixa normal (10–20%)." : "Acima da faixa recomendada — vale priorizar redução de gordura nos próximos meses."; } },
+  { key: "gorduraVisceral", label: "Gordura visceral", unidade: "", decimais: 0,
+    classificar: function(v){ if (v===null) return null; if (v<10) return "positivo"; if (v<=14) return "atencao"; return "negativo"; },
+    desc: function(v,c){ return c==="positivo" ? "Nível saudável — baixo risco cardiometabólico associado." : c==="atencao" ? "No limite superior; merece atenção." : "Elevada — associada a maior risco cardiovascular e metabólico. Atividade aeróbica regular ajuda a reduzir esse indicador."; } },
+  { key: "idadeCorpo", label: "Idade do corpo", unidade: " anos", decimais: 0,
+    classificar: function(v,bio){ if (v===null||!bio.idade) return null; const diff=v-bio.idade; if (diff<=0) return "positivo"; if (diff<=5) return "atencao"; return "negativo"; },
+    desc: function(v,c,bio){ const diff = bio&&bio.idade? v-bio.idade : null; if (diff===null) return ""; if (diff<=0) return "Sua idade corporal está igual ou abaixo da sua idade real — bom sinal."; if (diff<=5) return "Idade corporal "+diff+" anos acima da real — espaço para melhora."; return "Idade corporal "+diff+" anos acima da real, indicando necessidade de atenção a composição corporal e condicionamento."; } },
+  { key: "massaMuscularEsqueleticaKg", label: "Massa muscular esquelética", unidade: "kg", decimais: 1,
+    classificar: function(v){ if (v===null) return null; if (v>=35.2) return "positivo"; if (v>=28.8) return "atencao"; return "negativo"; },
+    desc: function(v,c){ return c==="positivo" ? "Acima da faixa normal para o seu perfil — bom volume muscular." : c==="atencao" ? "Dentro da faixa normal." : "Abaixo da faixa normal — treino de força pode ajudar a desenvolver massa muscular."; } },
+  { key: "bmrKcal", label: "Metabolismo basal (BMR)", unidade: " kcal", decimais: 0,
+    classificar: function(){ return "atencao"; },
+    desc: function(){ return "Quantidade mínima de energia que seu corpo consome em repouso. Não tem faixa de 'bom ou ruim' — varia com sua composição corporal."; } }
+];
+
+function analisarIndicadoresBio(bio){
+  return BIO_INDICADORES.map(function(ind){
+    const valor = bio[ind.key];
+    const cat = ind.classificar(valor, bio);
+    return { label: ind.label, valor: valor, unidade: ind.unidade, decimais: ind.decimais, categoria: cat, descricao: ind.desc(valor, cat, bio) };
+  });
+}
+
+function gerarComparativoIA(atual, referencia, tituloPeriodo){
+  if (!atual || !referencia || atual.id===referencia.id) return [];
+  const textos = [];
+  const diffPeso = atual.pesoKg - referencia.pesoKg;
+  const diffGordura = (atual.massaGordaKg||0) - (referencia.massaGordaKg||0);
+  const diffMuscular = (atual.massaMuscularEsqueleticaKg||0) - (referencia.massaMuscularEsqueleticaKg||0);
+  const diffImc = (atual.imc||0) - (referencia.imc||0);
+  const diffVisceral = (atual.gorduraVisceral||0) - (referencia.gorduraVisceral||0);
+  const dataRef = new Date(referencia.dataMedicao).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
+
+  textos.push(tituloPeriodo+" ("+dataRef+"): peso "+(diffPeso>=0?"+":"")+diffPeso.toFixed(1)+"kg, massa gorda "+(diffGordura>=0?"+":"")+diffGordura.toFixed(1)+"kg, massa muscular "+(diffMuscular>=0?"+":"")+diffMuscular.toFixed(1)+"kg.");
+
+  if (diffGordura < -0.3 && diffMuscular >= -0.2) {
+    textos.push("Tendência positiva: redução de massa gorda com manutenção ou ganho de massa muscular — composição corporal melhorando, não apenas o peso na balança.");
+  } else if (diffGordura > 0.3 && diffMuscular < 0) {
+    textos.push("Atenção: aumento de massa gorda combinado com queda de massa muscular nesse período. Vale revisar treino de força e ingestão de proteína.");
+  } else if (Math.abs(diffPeso) < 0.3) {
+    textos.push("Peso estável nesse período, com pequenas variações na composição corporal.");
+  }
+  if (diffVisceral !== 0) {
+    textos.push("Gordura visceral "+(diffVisceral>0?"aumentou":"diminuiu")+" "+Math.abs(diffVisceral).toFixed(0)+" ponto(s) no período.");
+  }
+  return textos;
+}
+
+function renderIndicadorBadge(categoria){
+  const map = { positivo: { label:"Bom", color:"#4ED9A0" }, atencao: { label:"Moderado", color:"#F2D94B" }, negativo: { label:"Alerta", color:"#F2685B" } };
+  const c = map[categoria] || { label:"—", color:"var(--text-dim)" };
+  return '<span class="badge" style="background:'+c.color+'22;color:'+c.color+';">'+c.label+'</span>';
+}
+
+function renderVisaoGeralBio(){
+  const atual = bioMaisRecente();
+  if (!atual) return '<div class="empty-state">Nenhum relatório de bioimpedância ainda. Envie a foto do relatório no chat para que seja importado.</div>';
+  const anterior = bioAnterior();
+  const primeira = bioPrimeira();
+  const indicadores = analisarIndicadoresBio(atual);
+  const dataFmt = new Date(atual.dataMedicao).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
+
+  const comparativoAnterior = anterior ? gerarComparativoIA(atual, anterior, "Desde a medição anterior") : [];
+  const comparativoPrimeira = (primeira && primeira.id!==atual.id) ? gerarComparativoIA(atual, primeira, "Desde a primeira medição") : [];
+
+  return '<div class="section-title" style="margin-top:0;">Análise assistida por IA</div>'+
+    (comparativoAnterior.length ? comparativoAnterior.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("") : '<div class="insight-row">'+icon("bulb")+'<span>Esta é sua primeira medição registrada. Assim que houver uma segunda, mostraremos a evolução aqui.</span></div>')+
+    (comparativoPrimeira.length ? '<p style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px;">Desde a primeira medição</p>'+comparativoPrimeira.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("") : '')+
+
+    '<div class="section-title">Última medição · '+dataFmt+'</div>'+
+    '<div class="grid grid-3" style="margin-bottom:8px;">'+
+      metricCard("Pontuação de saúde", atual.pontuacaoSaude) +
+      metricCard("Peso", atual.pesoKg!==null?atual.pesoKg.toFixed(2)+"kg":"—") +
+      metricCard("Tipo de corpo", atual.tipoCorpo||"—") +
+    '</div>'+
+
+    '<div class="section-title">Análise individual dos indicadores</div>'+
+    indicadores.map(function(ind){
+      return '<div class="list-row" style="align-items:flex-start;"><div class="list-row-main" style="flex:1;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'+
+        '<span class="list-row-title">'+ind.label+'</span>'+
+        '<span style="display:flex;align-items:center;gap:10px;"><span style="font-family:var(--font-mono);">'+(ind.valor!==null?ind.valor.toFixed(ind.decimais)+ind.unidade:"—")+'</span>'+renderIndicadorBadge(ind.categoria)+'</span>'+
+        '</div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+ind.descricao+'</div>'+
+        '</div></div>';
+    }).join("")+
+
+    '<div class="chart-wrap" style="height:220px;margin-top:20px;"><canvas id="chartBioEvolucao" role="img" aria-label="Gráfico de evolução de peso e massa gorda ao longo das medições"></canvas></div>';
 }
 
 function renderBioimpedanciaCard(bio, anterior){
@@ -1077,40 +1193,19 @@ function renderBioimpedanciaCard(bio, anterior){
   '</div>';
 }
 
-function gerarInsightsBioimpedancia(){
+function renderHistoricoBio(){
   const lista = bioOrdenada();
-  if (!lista.length) return ["Nenhum relatório de bioimpedância importado ainda."];
-  const atual = lista[lista.length-1];
-  const insights = [];
-  if (atual.imc !== null) {
-    if (atual.imc >= 25) insights.push("Seu IMC atual ("+atual.imc.toFixed(1)+") está na faixa de sobrepeso/obesidade segundo a classificação padrão. O relatório aponta um controle de peso recomendado de "+(atual.controlePesoKg!==null?atual.controlePesoKg.toFixed(1):"—")+"kg para chegar ao peso padrão de "+(atual.pesoPadraoKg||"—")+"kg.");
-    else insights.push("Seu IMC atual ("+atual.imc.toFixed(1)+") está dentro da faixa considerada normal.");
-  }
-  if (atual.gorduraVisceral !== null && atual.gorduraVisceral >= 10) {
-    insights.push("Seu nível de gordura visceral ("+atual.gorduraVisceral+") está no limite/acima do recomendado. Gordura visceral elevada está associada a maior risco cardiometabólico — atividade aeróbica regular tende a reduzir esse indicador de forma mais eficaz que dieta isolada.");
-  }
-  if (lista.length >= 2) {
-    const ant = lista[lista.length-2];
-    const diffPeso = atual.pesoKg - ant.pesoKg;
-    const diffGordura = (atual.massaGordaKg||0) - (ant.massaGordaKg||0);
-    const diffMuscular = (atual.massaMuscularEsqueleticaKg||0) - (ant.massaMuscularEsqueleticaKg||0);
-    if (Math.abs(diffPeso) > 0.3) {
-      insights.push("Desde a última medição, seu peso "+(diffPeso>0?"subiu":"caiu")+" "+Math.abs(diffPeso).toFixed(1)+"kg. Nesse período, a massa gorda "+(diffGordura>0?"aumentou":"diminuiu")+" "+Math.abs(diffGordura).toFixed(1)+"kg e a massa muscular "+(diffMuscular>0?"aumentou":"diminuiu")+" "+Math.abs(diffMuscular).toFixed(1)+"kg.");
-    }
-  }
-  return insights;
+  if (!lista.length) return '<div class="empty-state">Nenhum relatório ainda.</div>';
+  return [...lista].reverse().map(function(b, i){ return renderBioimpedanciaCard(b, lista[lista.length-2-i] || null); }).join("");
 }
 
 function renderBioimpedanciaTab(){
-  const lista = bioOrdenada();
-  if (!lista.length) return '<div class="empty-state">Nenhum relatório de bioimpedância ainda. Envie a foto do relatório no chat para que seja importado.</div>';
-  const insights = gerarInsightsBioimpedancia();
-  const atual = lista[lista.length-1];
-  return '<div class="section-title" style="margin-top:0;">Análise assistida por IA</div>'+
-    insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
-    '<div class="chart-wrap" style="height:220px;margin-top:20px;"><canvas id="chartBioEvolucao" role="img" aria-label="Gráfico de evolução de peso e massa gorda ao longo das medições"></canvas></div>'+
-    '<div class="section-title">Histórico de relatórios</div>'+
-    [...lista].reverse().map(function(b, i){ return renderBioimpedanciaCard(b, lista[lista.length-2-i] || null); }).join("");
+  if (!state.bioTab) state.bioTab = "geral";
+  const tabs = [{id:"geral",label:"Visão geral"},{id:"historico",label:"Histórico"}];
+  return tabsHtml(tabs, state.bioTab, "biotab") +
+    '<div id="bio-content">' + (
+      state.bioTab==="geral" ? renderVisaoGeralBio() : renderHistoricoBio()
+    ) + '</div>';
 }
 
 function renderRegistroPesoForm(){
@@ -1165,67 +1260,147 @@ function renderPesoTab(){
     ) + '</div>';
 }
 
-function renderRegistroExercicioForm(){
-  const today = new Date().toISOString().slice(0,10);
-  return '<div class="form-grid">'+
-    field("Data", '<input type="date" id="fe-data" value="'+today+'" />') +
-    field("Tipo de atividade", '<select id="fe-tipo"><option value="Academia">Academia</option><option value="Futebol">Futebol</option><option value="Natação">Natação</option><option value="Bike">Bike</option><option value="Corrida">Corrida</option><option value="Outro">Outro</option></select>') +
-    field("Duração (horas)", '<input type="number" id="fe-duracao" min="0" max="10" step="0.1" placeholder="ex: 1.0" />') +
-    field("Passos no dia (opcional)", '<input type="number" id="fe-passos" min="0" max="50000" />') +
-    field("Minutos ativo no dia (opcional)", '<input type="number" id="fe-ativo" min="0" max="1000" />') +
-    field("Observação", '<textarea id="fe-notas" rows="2"></textarea>') +
-    '<button class="btn btn-primary" id="btn-salvar-exercicio">'+icon("check")+' Salvar atividade</button>'+
-    '<div class="toast" id="msg-salvo-exercicio" style="display:none;">'+icon("check")+' Atividade salva</div></div>';
+function calcDuracaoAtividade(horaInicio, horaFim){
+  if (!horaInicio || !horaFim) return null;
+  return calcDuracao(horaInicio, horaFim);
 }
 
-function renderHistoricoExercicios(){
-  const lista = [...state.exercicios].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,60);
-  if (!lista.length) return '<div class="empty-state">Nenhuma atividade registrada ainda.</div>';
-  return lista.map(function(e){
-    const dataFmt = new Date(e.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
-    const detalhes = [];
-    if (e.tipo) detalhes.push(e.tipo);
-    if (e.duracaoHoras) detalhes.push(fmtHoras(e.duracaoHoras));
-    if (e.passos) detalhes.push(e.passos.toLocaleString("pt-BR")+" passos");
-    if (e.minutosAtivo) detalhes.push(e.minutosAtivo+" min ativo");
-    return '<div class="list-row"><div class="list-row-main"><div class="list-row-title">'+dataFmt+'</div>'+
-      '<div class="list-row-sub" style="font-family:var(--font-body);">'+(detalhes.join(" · ")||"—")+'</div></div>'+
-      '<button class="icon-btn" data-delexercicio="'+e.id+'" aria-label="Excluir atividade">'+icon("trash")+'</button></div>';
-  }).join("");
+function movPorData(data){ return state.movimentacao.find(function(m){ return m.data===data; }) || null; }
+
+function exerAtividadeGetPeriodo(){
+  if (!state.atividadeView) state.atividadeView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
+  return getPeriodoAtual("atividadeView");
+}
+
+function renderFiltroAtividade(){
+  const tiposDisponiveis = Array.from(new Set(state.exercicios.map(function(e){ return e.tipo; }).filter(Boolean))).sort();
+  const v = state.atividadeView;
+  return renderPeriodSelector("atividadeView") +
+    '<div style="margin:-6px 0 18px;">'+
+      '<select id="filtro-tipo-atividade" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;color:var(--text);max-width:220px;">'+
+        '<option value="">Todos os tipos</option>'+
+        tiposDisponiveis.map(function(t){ return '<option value="'+t+'" '+(v.filtroTipo===t?"selected":"")+'>'+t+'</option>'; }).join("")+
+      '</select>'+
+    '</div>';
 }
 
 function renderAnaliseExercicios(){
-  const lista = state.exercicios;
-  if (!lista.length) return '<div class="empty-state">Nenhum dado ainda.</div>';
-  const ultimos30 = lista.filter(function(e){
-    const d = new Date(e.data+"T00:00:00");
-    return (new Date() - d) <= 30*24*3600*1000;
-  });
+  if (!state.atividadeView) state.atividadeView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
+  const { start, end } = exerAtividadeGetPeriodo();
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const filtroTipo = state.atividadeView.filtroTipo;
+
+  let atividades = state.exercicios.filter(function(e){ return e.data>=startIso && e.data<=endIso; });
+  if (filtroTipo) atividades = atividades.filter(function(e){ return e.tipo===filtroTipo; });
+
+  const movs = state.movimentacao.filter(function(m){ return m.data>=startIso && m.data<=endIso; });
+
+  const diasAtivos = new Set(atividades.map(function(e){ return e.data; })).size;
+  const mediaPassos = movs.filter(function(m){ return m.passos; }).length ? Math.round(avg(movs.filter(function(m){ return m.passos; }).map(function(m){ return m.passos; }))) : null;
+  const mediaAtivo = movs.filter(function(m){ return m.minutosAtivo; }).length ? Math.round(avg(movs.filter(function(m){ return m.minutosAtivo; }).map(function(m){ return m.minutosAtivo; }))) : null;
+  const mediaCalorias = movs.filter(function(m){ return m.caloriasTotais; }).length ? Math.round(avg(movs.filter(function(m){ return m.caloriasTotais; }).map(function(m){ return m.caloriasTotais; }))) : null;
+  const mediaDistancia = movs.filter(function(m){ return m.distanciaKm; }).length ? avg(movs.filter(function(m){ return m.distanciaKm; }).map(function(m){ return m.distanciaKm; })) : null;
+
   const porTipo = {};
-  ultimos30.forEach(function(e){ if (e.tipo) porTipo[e.tipo] = (porTipo[e.tipo]||0)+1; });
-  const diasComAtividade = new Set(ultimos30.filter(e=>e.tipo).map(e=>e.data)).size;
-  const totalPassos = lista.filter(e=>e.passos).slice(-30);
-  const mediaPassos = totalPassos.length ? Math.round(avg(totalPassos.map(e=>e.passos))) : null;
+  atividades.forEach(function(e){ if (e.tipo) porTipo[e.tipo] = (porTipo[e.tipo]||0)+1; });
+  const tipoMaisFreq = Object.keys(porTipo).sort(function(a,b){ return porTipo[b]-porTipo[a]; })[0];
 
   const insights = [];
-  insights.push("Nos últimos 30 dias, você se exercitou em "+diasComAtividade+" dias.");
-  const tipoMaisFreq = Object.keys(porTipo).sort(function(a,b){ return porTipo[b]-porTipo[a]; })[0];
-  if (tipoMaisFreq) insights.push("Sua atividade mais frequente foi "+tipoMaisFreq+" ("+porTipo[tipoMaisFreq]+"x).");
-  if (mediaPassos) insights.push("Sua média de passos diários (últimos registros) é de "+mediaPassos.toLocaleString("pt-BR")+".");
+  insights.push("No período selecionado, você teve "+diasAtivos+" dia(s) com atividade física registrada"+(filtroTipo?" do tipo "+filtroTipo:"")+".");
+  if (tipoMaisFreq) insights.push("Atividade mais frequente: "+tipoMaisFreq+" ("+porTipo[tipoMaisFreq]+"x).");
+  if (mediaPassos) insights.push("Média de passos no período: "+mediaPassos.toLocaleString("pt-BR")+" por dia.");
 
-  return '<div class="grid grid-3" style="margin-bottom:20px;">'+
-      metricCard("Dias ativos (30d)", diasComAtividade) +
+  return renderFiltroAtividade() +
+    '<div class="grid grid-4" style="margin-bottom:20px;">'+
+      metricCard("Dias ativos", diasAtivos, "run") +
+      metricCard("Passos (média)", mediaPassos!==null?mediaPassos.toLocaleString("pt-BR"):"—") +
+      metricCard("Tempo ativo (média)", mediaAtivo!==null?mediaAtivo+" min":"—") +
+      metricCard("Calorias (média)", mediaCalorias!==null?mediaCalorias.toLocaleString("pt-BR")+" kcal":"—") +
+    '</div>'+
+    '<div class="grid grid-2" style="margin-bottom:20px;">'+
+      metricCard("Distância (média)", mediaDistancia!==null?mediaDistancia.toFixed(1)+" km":"—") +
       metricCard("Atividade mais frequente", tipoMaisFreq||"—") +
-      metricCard("Média de passos", mediaPassos!==null?mediaPassos.toLocaleString("pt-BR"):"—") +
     '</div>'+
     '<div class="chart-wrap" style="height:220px;"><canvas id="chartExerciciosTipo" role="img" aria-label="Gráfico de frequência por tipo de exercício"></canvas></div>'+
     '<div class="section-title">Observações</div>'+
     insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
 }
 
+function renderRegistroAtividadeForm(){
+  const today = new Date().toISOString().slice(0,10);
+  return '<div class="form-grid">'+
+    '<p style="font-size:12.5px;color:var(--text-dim);margin:-6px 0 4px;">Registre uma atividade física específica que você praticou.</p>'+
+    field("Data", '<input type="date" id="fe-data" value="'+today+'" />') +
+    field("Tipo de atividade", '<select id="fe-tipo"><option value="Academia">Academia</option><option value="Futebol">Futebol</option><option value="Natação">Natação</option><option value="Bike">Bike</option><option value="Corrida">Corrida</option><option value="Outro">Outro</option></select>') +
+    '<div class="form-row">'+field("Hora início", '<input type="time" id="fe-inicio" value="19:00" />')+field("Hora fim", '<input type="time" id="fe-fim" value="20:00" />')+'</div>'+
+    field("Observação", '<textarea id="fe-notas" rows="2"></textarea>') +
+    '<button class="btn btn-primary" id="btn-salvar-exercicio">'+icon("check")+' Salvar atividade</button>'+
+    '<div class="toast" id="msg-salvo-exercicio" style="display:none;">'+icon("check")+' Atividade salva</div></div>';
+}
+
+function renderRegistroMovimentacaoForm(){
+  const today = new Date().toISOString().slice(0,10);
+  return '<div class="form-grid">'+
+    '<p style="font-size:12.5px;color:var(--text-dim);margin:-6px 0 4px;">Registre as movimentações do dia (dados do smartwatch), independente de ter feito uma atividade específica.</p>'+
+    field("Data", '<input type="date" id="fm-data" value="'+today+'" />') +
+    field("Tempo ativo (minutos)", '<input type="number" id="fm-ativo" min="0" max="1000" placeholder="ex: 90" />') +
+    field("Passos", '<input type="number" id="fm-passos" min="0" max="50000" placeholder="ex: 8000" />') +
+    field("Calorias da atividade", '<input type="number" id="fm-calatividade" min="0" max="5000" placeholder="ex: 350" />') +
+    field("Total de calorias perdidas", '<input type="number" id="fm-caltotal" min="0" max="6000" placeholder="ex: 2100" />') +
+    field("Distância durante atividade (km)", '<input type="number" id="fm-distancia" min="0" max="100" step="0.1" placeholder="ex: 5.2" />') +
+    '<button class="btn btn-primary" id="btn-salvar-movimentacao">'+icon("check")+' Salvar movimentação</button>'+
+    '<div class="toast" id="msg-salvo-movimentacao" style="display:none;">'+icon("check")+' Movimentação salva</div></div>';
+}
+
+function renderRegistroExercicioForm(){
+  if (!state.tipoRegistroAtividade) state.tipoRegistroAtividade = "atividade";
+  const opcoes = [{id:"atividade",label:"Atividade física"},{id:"movimentacao",label:"Movimentação do dia"}];
+  return tabsHtml(opcoes, state.tipoRegistroAtividade, "tiporegistro") +
+    '<div id="registro-atividade-content">' + (
+      state.tipoRegistroAtividade==="atividade" ? renderRegistroAtividadeForm() : renderRegistroMovimentacaoForm()
+    ) + '</div>';
+}
+
+function renderHistoricoExercicios(){
+  const datasAtividade = new Set(state.exercicios.map(function(e){ return e.data; }));
+  const datasMov = new Set(state.movimentacao.map(function(m){ return m.data; }));
+  const todasDatas = Array.from(new Set([...datasAtividade, ...datasMov])).sort().reverse().slice(0,60);
+  if (!todasDatas.length) return '<div class="empty-state">Nenhum dado registrado ainda.</div>';
+
+  return todasDatas.map(function(data){
+    const dataFmt = new Date(data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
+    const atividadesDoDia = state.exercicios.filter(function(e){ return e.data===data; });
+    const mov = movPorData(data);
+
+    const detalhesAtividade = atividadesDoDia.map(function(e){
+      const dur = calcDuracaoAtividade(e.horaInicio, e.horaFim);
+      return e.tipo+(e.horaInicio&&e.horaFim?" ("+e.horaInicio+"–"+e.horaFim+(dur?", "+fmtHoras(dur):"")+")":"");
+    }).join(" · ");
+
+    const detalhesMov = [];
+    if (mov) {
+      if (mov.passos) detalhesMov.push(mov.passos.toLocaleString("pt-BR")+" passos");
+      if (mov.minutosAtivo) detalhesMov.push(mov.minutosAtivo+" min ativo");
+      if (mov.caloriasTotais) detalhesMov.push(mov.caloriasTotais+" kcal");
+      if (mov.distanciaKm) detalhesMov.push(mov.distanciaKm+" km");
+    }
+
+    const botoesExcluir = atividadesDoDia.map(function(e){ return '<button class="icon-btn" data-delexercicio="'+e.id+'" aria-label="Excluir atividade" title="Excluir atividade">'+icon("trash")+'</button>'; }).join("");
+    const botaoExcluirMov = mov ? '<button class="icon-btn" data-delmovimentacao="'+mov.id+'" aria-label="Excluir movimentação" title="Excluir movimentação"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17l3.5-2 2-4 4 1 3 5 3.5 1.5"/></svg></button>' : '';
+
+    return '<div class="list-row" style="flex-wrap:wrap;"><div class="list-row-main">'+
+      '<div class="list-row-title">'+dataFmt+'</div>'+
+      (detalhesAtividade?'<div class="list-row-sub" style="font-family:var(--font-body);color:var(--purple);">'+detalhesAtividade+'</div>':'')+
+      (detalhesMov.length?'<div class="list-row-sub" style="font-family:var(--font-body);">'+detalhesMov.join(" · ")+'</div>':'')+
+      '</div>'+
+      '<div style="display:flex;gap:4px;">'+botoesExcluir+botaoExcluirMov+'</div>'+
+      '</div>';
+  }).join("");
+}
+
 function renderExerciciosTab(){
-  if (!state.exercicioTab) state.exercicioTab = "registro";
-  const tabs = [{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"},{id:"analise",label:"Análises"}];
+  if (!state.exercicioTab) state.exercicioTab = "analise";
+  const tabs = [{id:"analise",label:"Análises"},{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"}];
   return tabsHtml(tabs, state.exercicioTab, "exerciciotab") +
     '<div id="exercicio-content">' + (
       state.exercicioTab==="registro" ? renderRegistroExercicioForm() :
@@ -1420,10 +1595,11 @@ function drawPesoEvolucaoChart(){
 }
 
 function drawExerciciosTipoChart(){
-  const lista = state.exercicios.filter(function(e){
-    const d = new Date(e.data+"T00:00:00");
-    return e.tipo && (new Date() - d) <= 90*24*3600*1000;
-  });
+  const { start, end } = exerAtividadeGetPeriodo();
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const filtroTipo = state.atividadeView ? state.atividadeView.filtroTipo : "";
+  let lista = state.exercicios.filter(function(e){ return e.tipo && e.data>=startIso && e.data<=endIso; });
+  if (filtroTipo) lista = lista.filter(function(e){ return e.tipo===filtroTipo; });
   if (!lista.length) return;
   const porTipo = {};
   lista.forEach(function(e){ porTipo[e.tipo] = (porTipo[e.tipo]||0)+1; });
@@ -1431,7 +1607,7 @@ function drawExerciciosTipoChart(){
   const valores = labels.map(function(l){ return porTipo[l]; });
   const c = document.getElementById("chartExerciciosTipo");
   if (!c) return;
-  new Chart(c, { type:"bar", data:{ labels:labels, datasets:[{ label:"Sessões (90d)", data:valores, backgroundColor:"#6C63FF", borderRadius:3 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:"#8A8FA3",font:{size:11}}}, y:Object.assign({beginAtZero:true},baseGridOpts()) } } });
+  new Chart(c, { type:"bar", data:{ labels:labels, datasets:[{ label:"Sessões", data:valores, backgroundColor:"#6C63FF", borderRadius:3 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:"#8A8FA3",font:{size:11}}}, y:Object.assign({beginAtZero:true},baseGridOpts()) } } });
 }
 
 function closeSidebarMobile(){
@@ -1597,6 +1773,11 @@ function attachHandlers(){
   document.querySelectorAll("[data-exerciciosecao]").forEach(function(btn){ btn.addEventListener("click", function(){ state.exerciciosSecao = btn.getAttribute("data-exerciciosecao"); render(); }); });
   document.querySelectorAll("[data-pesotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.pesoTab = btn.getAttribute("data-pesotab"); render(); }); });
   document.querySelectorAll("[data-exerciciotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.exercicioTab = btn.getAttribute("data-exerciciotab"); render(); }); });
+  document.querySelectorAll("[data-biotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.bioTab = btn.getAttribute("data-biotab"); render(); }); });
+  document.querySelectorAll("[data-tiporegistro]").forEach(function(btn){ btn.addEventListener("click", function(){ state.tipoRegistroAtividade = btn.getAttribute("data-tiporegistro"); render(); }); });
+
+  const filtroTipoAtividade = document.getElementById("filtro-tipo-atividade");
+  if (filtroTipoAtividade) filtroTipoAtividade.addEventListener("change", function(){ state.atividadeView.filtroTipo = filtroTipoAtividade.value; render(); });
 
   const btnSalvarPeso = document.getElementById("btn-salvar-peso");
   if (btnSalvarPeso) btnSalvarPeso.addEventListener("click", async function(){
@@ -1622,9 +1803,8 @@ function attachHandlers(){
     const reg = {
       data: document.getElementById("fe-data").value,
       tipo: document.getElementById("fe-tipo").value,
-      duracaoHoras: Number(document.getElementById("fe-duracao").value)||null,
-      passos: Number(document.getElementById("fe-passos").value)||null,
-      minutosAtivo: Number(document.getElementById("fe-ativo").value)||null,
+      horaInicio: document.getElementById("fe-inicio").value || null,
+      horaFim: document.getElementById("fe-fim").value || null,
       notas: document.getElementById("fe-notas").value,
       importado: false
     };
@@ -1639,6 +1819,36 @@ function attachHandlers(){
     const id = btn.getAttribute("data-delexercicio");
     await DB.deleteExercicio(id);
     state.exercicios = state.exercicios.filter(e=>e.id!==id);
+    render();
+  }); });
+
+  const btnSalvarMovimentacao = document.getElementById("btn-salvar-movimentacao");
+  if (btnSalvarMovimentacao) btnSalvarMovimentacao.addEventListener("click", async function(){
+    const dataVal = document.getElementById("fm-data").value;
+    const reg = {
+      data: dataVal,
+      minutosAtivo: Number(document.getElementById("fm-ativo").value)||null,
+      passos: Number(document.getElementById("fm-passos").value)||null,
+      caloriasAtividade: Number(document.getElementById("fm-calatividade").value)||null,
+      caloriasTotais: Number(document.getElementById("fm-caltotal").value)||null,
+      distanciaKm: Number(document.getElementById("fm-distancia").value)||null
+    };
+    btnSalvarMovimentacao.disabled = true;
+    const existente = movPorData(dataVal);
+    if (existente) reg.id = existente.id;
+    const salvo = await DB.upsertMovimentacao(reg);
+    if (salvo) {
+      state.movimentacao = state.movimentacao.filter(function(m){ return m.data!==dataVal; });
+      state.movimentacao.push(salvo);
+    }
+    btnSalvarMovimentacao.disabled = false;
+    const msg = document.getElementById("msg-salvo-movimentacao");
+    if (msg) { msg.style.display="flex"; setTimeout(()=>{ if(msg) msg.style.display="none"; },2500); }
+  });
+  document.querySelectorAll("[data-delmovimentacao]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delmovimentacao");
+    await DB.deleteMovimentacao(id);
+    state.movimentacao = state.movimentacao.filter(function(m){ return m.id!==id; });
     render();
   }); });
 

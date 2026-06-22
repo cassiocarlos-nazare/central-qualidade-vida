@@ -114,10 +114,17 @@ function rowPesoToApp(r){ return { id: r.id, data: r.data, pesoKg: Number(r.peso
 function appPesoToRow(p){ return { id: (p.id && p.id.length===36)?p.id:undefined, data: p.data, peso_kg: p.pesoKg, notas: p.notas||null }; }
 
 function rowExercicioToApp(r){
-  return { id: r.id, data: r.data, tipo: r.tipo, duracaoHoras: r.duracao_horas!==null?Number(r.duracao_horas):null, passos: r.passos, minutosAtivo: r.minutos_ativo, notas: r.notas, importado: r.importado };
+  return { id: r.id, data: r.data, tipo: r.tipo, horaInicio: r.hora_inicio?r.hora_inicio.slice(0,5):null, horaFim: r.hora_fim?r.hora_fim.slice(0,5):null, notas: r.notas, importado: r.importado };
 }
 function appExercicioToRow(e){
-  return { id: (e.id && e.id.length===36)?e.id:undefined, data: e.data, tipo: e.tipo||null, duracao_horas: e.duracaoHoras, passos: e.passos, minutos_ativo: e.minutosAtivo, notas: e.notas||null, importado: e.importado||false };
+  return { id: (e.id && e.id.length===36)?e.id:undefined, data: e.data, tipo: e.tipo||null, hora_inicio: e.horaInicio||null, hora_fim: e.horaFim||null, notas: e.notas||null, importado: e.importado||false };
+}
+
+function rowMovimentacaoToApp(r){
+  return { id: r.id, data: r.data, minutosAtivo: r.minutos_ativo, passos: r.passos, caloriasAtividade: r.calorias_atividade, caloriasTotais: r.calorias_totais, distanciaKm: r.distancia_km!==null?Number(r.distancia_km):null };
+}
+function appMovimentacaoToRow(m){
+  return { id: (m.id && m.id.length===36)?m.id:undefined, data: m.data, minutos_ativo: m.minutosAtivo, passos: m.passos, calorias_atividade: m.caloriasAtividade, calorias_totais: m.caloriasTotais, distancia_km: m.distanciaKm };
 }
 
 const DB = {
@@ -274,5 +281,22 @@ Object.assign(DB, {
       sb.from("exercicios").select("id", { count: "exact", head: true })
     ]);
     return { bioimpedancia: b.count||0, peso: p.count||0, exercicios: e.count||0 };
+  },
+
+  async getMovimentacao(){
+    const { data, error } = await sb.from("movimentacao_diaria").select("*").order("data", { ascending: true });
+    if (error) { console.error("Erro ao buscar movimentação:", error); return []; }
+    return data.map(rowMovimentacaoToApp);
+  },
+  async upsertMovimentacao(m){
+    const row = appMovimentacaoToRow(m);
+    const { data, error } = await sb.from("movimentacao_diaria").upsert(row, { onConflict: "data" }).select().single();
+    if (error) { console.error("Erro ao salvar movimentação:", error); return null; }
+    return rowMovimentacaoToApp(data);
+  },
+  async deleteMovimentacao(id){
+    const { error } = await sb.from("movimentacao_diaria").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir movimentação:", error); return false; }
+    return true;
   }
 });
