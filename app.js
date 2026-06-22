@@ -208,7 +208,7 @@ function gruposSonoNoPeriodo(regs){
 }
 
 function isoDate(d){ return d.toISOString().slice(0,10); }
-function startOfWeek(d){ const r = new Date(d); const day = r.getDay(); const diff = day===0?-6:1-day; r.setDate(r.getDate()+diff); r.setHours(0,0,0,0); return r; }
+function startOfWeek(d){ const r = new Date(d); const day = r.getDay(); r.setDate(r.getDate()-day); r.setHours(0,0,0,0); return r; }
 function endOfWeek(d){ const s = startOfWeek(d); const e = new Date(s); e.setDate(e.getDate()+6); return e; }
 function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
 function endOfMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
@@ -216,8 +216,9 @@ function endOfMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
 function capitalizeMonthLabel(s){
   return s.replace(/\b(de)\b/gi, "de").replace(/^./, c=>c.toUpperCase());
 }
-function getPeriodoAtual(){
-  const v = state.sonoView || { tipo: "mes", offset: 0 };
+function getPeriodoAtual(stateKey){
+  const key = stateKey || "sonoView";
+  const v = state[key] || { tipo: "mes", offset: 0 };
   const hoje = new Date();
   if (v.tipo === "mes") {
     const ref = new Date(hoje.getFullYear(), hoje.getMonth()+v.offset, 1);
@@ -266,6 +267,18 @@ function desvioPadraoHorario(regs, campo){
   const media = mins.reduce((a,b)=>a+b,0)/mins.length;
   const variancia = mins.reduce((s,m)=>s+Math.pow(m-media,2),0)/mins.length;
   return Math.sqrt(variancia);
+}
+
+const REFERENCIA_SONO = {
+  remMin: 20, remMax: 25,
+  profundoMin: 13, profundoMax: 23
+};
+
+function avaliarFaixa(valor, min, max){
+  if (valor === null || valor === undefined) return null;
+  if (valor < min) return "abaixo";
+  if (valor > max) return "acima";
+  return "dentro";
 }
 
 function gerarDicasSono(){
@@ -493,31 +506,32 @@ function periodNavLabel(){
   return v.tipo === "mes" ? "Mês" : "Semana";
 }
 
-function renderPeriodSelector(){
-  const v = state.sonoView;
-  const { label } = getPeriodoAtual();
+function renderPeriodSelector(stateKey){
+  const key = stateKey || "sonoView";
+  const v = state[key];
+  const { label } = getPeriodoAtual(key);
   const tipos = [{id:"mes",label:"Mês"},{id:"semana",label:"Semana"},{id:"custom",label:"Período"}];
   let nav = "";
   if (v.tipo !== "custom") {
     nav = '<div style="display:flex;align-items:center;gap:8px;">'+
-      '<button class="icon-btn" id="btn-periodo-prev" aria-label="Período anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>'+
+      '<button class="icon-btn" data-periodoprev="'+key+'" aria-label="Período anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>'+
       '<div style="font-size:13.5px;font-weight:500;min-width:150px;text-align:center;">'+label+'</div>'+
-      '<button class="icon-btn" id="btn-periodo-next" aria-label="Próximo período"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>'+
-      (v.offset !== 0 ? '<button class="btn btn-ghost" id="btn-periodo-hoje" style="padding:6px 12px;font-size:12px;">Hoje</button>' : '') +
+      '<button class="icon-btn" data-periodonext="'+key+'" aria-label="Próximo período"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>'+
+      (v.offset !== 0 ? '<button class="btn btn-ghost" data-periodohoje="'+key+'" style="padding:6px 12px;font-size:12px;">Hoje</button>' : '') +
       '</div>';
   } else {
     const di = v.dataInicio || isoDate(startOfMonth(new Date()));
     const df = v.dataFim || isoDate(new Date());
     nav = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
-      '<input type="date" id="custom-data-inicio" value="'+di+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
+      '<input type="date" id="custom-data-inicio-'+key+'" value="'+di+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
       '<span style="color:var(--text-faint);font-size:13px;">até</span>'+
-      '<input type="date" id="custom-data-fim" value="'+df+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
-      '<button class="btn btn-ghost" id="btn-aplicar-custom" style="padding:8px 14px;font-size:12.5px;">Aplicar</button>'+
+      '<input type="date" id="custom-data-fim-'+key+'" value="'+df+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
+      '<button class="btn btn-ghost" data-aplicarcustom="'+key+'" style="padding:8px 14px;font-size:12.5px;">Aplicar</button>'+
       '</div>';
   }
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;">'+
     '<div class="tabs" style="border-bottom:none;margin-bottom:0;">'+
-      tipos.map(function(t){ return '<button class="tab-btn '+(v.tipo===t.id?'is-active':'')+'" data-periodotipo="'+t.id+'" style="padding:7px 12px;">'+t.label+'</button>'; }).join("")+
+      tipos.map(function(t){ return '<button class="tab-btn '+(v.tipo===t.id?'is-active':'')+'" data-periodotipo="'+key+':'+t.id+'" style="padding:7px 12px;">'+t.label+'</button>'; }).join("")+
     '</div>'+ nav +
   '</div>';
 }
@@ -617,16 +631,20 @@ function renderHistoricoSono(){
     const cat = categoriaPorScore(g.score);
     const dataFmt = new Date(g.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
     const cochiloTag = g.temCochilo ? '<span class="module-tile-tag" style="margin-left:8px;">+'+g.cochilos.length+' cochilo'+(g.cochilos.length>1?"s":"")+'</span>' : '';
+    const remInfo = (g.horasRem!==null && g.horasRem>0) ? ' · REM '+fmtHoras(g.horasRem)+(g.pctRem!==null?' ('+g.pctRem.toFixed(1)+'%)':'') : '';
+    const fundoInfo = (g.horasFundo!==null && g.horasFundo>0) ? ' · prof. '+fmtHoras(g.horasFundo)+(g.pctFundo!==null?' ('+g.pctFundo.toFixed(1)+'%)':'') : '';
     let html = '<div class="list-row" style="flex-wrap:wrap;"><div class="list-row-main"><div class="list-row-title">'+dataFmt + cochiloTag + '</div>'+
-      '<div class="list-row-sub">'+(g.dormiu||"—")+' &rarr; '+(g.acordou||"—")+' · total '+fmtHoras(g.horasNaCama)+' · real '+fmtHoras(g.horasSonoReal)+'</div></div>'+
+      '<div class="list-row-sub">'+(g.dormiu||"—")+' &rarr; '+(g.acordou||"—")+' · total '+fmtHoras(g.horasNaCama)+' · real '+fmtHoras(g.horasSonoReal)+remInfo+fundoInfo+'</div></div>'+
       '<div class="badge" style="background:'+(cat?cat.color+'22':'')+';color:'+(cat?cat.color:'var(--text-dim)')+';">'+g.score+' · '+(cat?cat.label.replace("Sono ",""):"—")+'</div>'+
       '<button class="icon-btn" data-addnap="'+g.data+'" aria-label="Adicionar cochilo neste dia" title="Adicionar cochilo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>'+
       '<button class="icon-btn" data-delsono="'+g.noite.id+'" aria-label="Excluir registro">'+icon("trash")+'</button></div>';
     if (g.cochilos.length) {
       html += g.cochilos.map(function(c){
+        const remC = (c.horasRem!==null && c.horasRem>0) ? ' · REM '+fmtHoras(c.horasRem) : '';
+        const fundoC = (c.horasFundo!==null && c.horasFundo>0) ? ' · prof. '+fmtHoras(c.horasFundo) : '';
         return '<div class="list-row" style="margin-left:20px;background:transparent;border-style:dashed;opacity:0.85;"><div class="list-row-main">'+
           '<div class="list-row-title" style="font-size:12.5px;font-weight:400;color:var(--text-dim);">Cochilo</div>'+
-          '<div class="list-row-sub">total '+fmtHoras(c.horasNaCama)+' · real '+fmtHoras(c.horasSonoReal)+' · score +'+(scoreNoite(c)||0)+'</div></div>'+
+          '<div class="list-row-sub">total '+fmtHoras(c.horasNaCama)+' · real '+fmtHoras(c.horasSonoReal)+remC+fundoC+' · score +'+(scoreNoite(c)||0)+'</div></div>'+
           '<button class="icon-btn" data-delsono="'+c.id+'" aria-label="Excluir cochilo">'+icon("trash")+'</button></div>';
       }).join("");
     }
@@ -634,23 +652,180 @@ function renderHistoricoSono(){
   }).join("");
 }
 
+// ---------- Análises avançadas de sono (filtro de período próprio) ----------
+
+function getSemanaCorrente(){
+  const hoje = new Date();
+  const diaSemana = hoje.getDay(); // 0=domingo
+  const inicio = new Date(hoje);
+  inicio.setDate(hoje.getDate() - diaSemana);
+  inicio.setHours(0,0,0,0);
+  const fim = new Date(inicio);
+  fim.setDate(inicio.getDate()+6);
+  return { start: inicio, end: fim };
+}
+
+function gruposNoIntervalo(start, end){
+  return gruposSonoNoPeriodo(regsNoPeriodo(start, end));
+}
+
+function analisarRemProfundo(grupos){
+  const comRem = grupos.filter(g=>g.pctRem!==null && g.horasSonoReal>0);
+  const comFundo = grupos.filter(g=>g.pctFundo!==null && g.horasSonoReal>0);
+  const mediaPctRem = comRem.length ? avg(comRem.map(g=>g.pctRem)) : null;
+  const mediaPctFundo = comFundo.length ? avg(comFundo.map(g=>g.pctFundo)) : null;
+  return {
+    mediaPctRem, mediaPctFundo,
+    statusRem: avaliarFaixa(mediaPctRem, REFERENCIA_SONO.remMin, REFERENCIA_SONO.remMax),
+    statusFundo: avaliarFaixa(mediaPctFundo, REFERENCIA_SONO.profundoMin, REFERENCIA_SONO.profundoMax),
+    nDiasComDado: Math.max(comRem.length, comFundo.length)
+  };
+}
+
+function gerarAnaliseRemProfundoIA(analise){
+  const { mediaPctRem, mediaPctFundo, statusRem, statusFundo, nDiasComDado } = analise;
+  if (nDiasComDado === 0) {
+    return ["Não há dados de REM/sono profundo no período selecionado para essa análise. Esses dados ficam disponíveis a partir de maio, quando seu relógio passou a registrar esse detalhamento."];
+  }
+  const textos = [];
+  textos.push("Referência: organizações de sono recomendam de "+REFERENCIA_SONO.remMin+"% a "+REFERENCIA_SONO.remMax+"% do sono em fase REM, e de "+REFERENCIA_SONO.profundoMin+"% a "+REFERENCIA_SONO.profundoMax+"% em sono profundo, para adultos.");
+
+  if (mediaPctRem !== null) {
+    if (statusRem === "dentro") {
+      textos.push("Seu REM médio de "+mediaPctRem.toFixed(1)+"% está dentro da faixa recomendada. Isso é positivo para consolidação de memória e processamento emocional.");
+    } else if (statusRem === "abaixo") {
+      textos.push("Seu REM médio de "+mediaPctRem.toFixed(1)+"% está abaixo da faixa recomendada ("+REFERENCIA_SONO.remMin+"–"+REFERENCIA_SONO.remMax+"%). REM tende a se concentrar na segunda metade da noite, então dormir menos horas ou acordar muito cedo reduz desproporcionalmente essa fase. Álcool e privação de sono também suprimem REM.");
+    } else {
+      textos.push("Seu REM médio de "+mediaPctRem.toFixed(1)+"% está acima da faixa de referência. Isoladamente isso raramente é um problema, mas pode acompanhar fragmentação do sono ou efeito rebote após períodos de privação.");
+    }
+  }
+  if (mediaPctFundo !== null) {
+    if (statusFundo === "dentro") {
+      textos.push("Seu sono profundo médio de "+mediaPctFundo.toFixed(1)+"% está dentro da faixa recomendada — bom sinal para recuperação física e imunológica.");
+    } else if (statusFundo === "abaixo") {
+      textos.push("Seu sono profundo médio de "+mediaPctFundo.toFixed(1)+"% está abaixo da faixa recomendada ("+REFERENCIA_SONO.profundoMin+"–"+REFERENCIA_SONO.profundoMax+"%). Sono profundo se concentra na primeira metade da noite; cafeína à tarde, álcool, telas antes de dormir e estresse antes de deitar tendem a reduzir essa fase. Manter o quarto mais frio e escuro costuma ajudar.");
+    } else {
+      textos.push("Seu sono profundo médio de "+mediaPctFundo.toFixed(1)+"% está acima da faixa de referência, o que pode ocorrer naturalmente após exercício físico intenso ou como compensação de débito de sono acumulado.");
+    }
+  }
+  return textos;
+}
+
+function analisarConstancia(grupos){
+  const comHorario = grupos.filter(g=>g.dormiu);
+  if (comHorario.length < 3) return null;
+  const desvDormir = desvioPadraoHorario(comHorario, "dormiu");
+  const desvAcordar = desvioPadraoHorario(comHorario.filter(g=>g.acordou), "acordou");
+  return { desvDormir, desvAcordar, n: comHorario.length };
+}
+
+function gerarAnaliseConstanciaIA(constancia){
+  if (!constancia) return ["Registre ao menos 3 noites com horário de dormir para avaliar sua constância."];
+  const { desvDormir, desvAcordar } = constancia;
+  const textos = [];
+  function classificar(desv){
+    if (desv <= 20) return "muito consistente";
+    if (desv <= 45) return "razoavelmente consistente";
+    if (desv <= 75) return "inconsistente";
+    return "bastante irregular";
+  }
+  textos.push("Seu horário de dormir variou em média "+Math.round(desvDormir)+" minutos no período ("+classificar(desvDormir)+"), e o horário de acordar variou "+Math.round(desvAcordar)+" minutos ("+classificar(desvAcordar)+").");
+  if (desvDormir > 45) {
+    textos.push("Manter um horário de dormir mais fixo — mesmo nos fins de semana — é uma das formas mais eficazes de estabilizar o ritmo circadiano e melhorar a qualidade geral do sono, geralmente com mais impacto do que apenas aumentar o total de horas dormidas.");
+  } else {
+    textos.push("Sua consistência de horário está em um nível saudável. Manter essa rotina tende a sustentar a qualidade do sono mesmo em semanas mais cheias.");
+  }
+  return textos;
+}
+
+function gerarResumoSemanaCorrenteIA(){
+  const { start, end } = getSemanaCorrente();
+  const grupos = gruposNoIntervalo(start, end);
+  const fmtData = (d) => d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
+  const label = fmtData(start)+" a "+fmtData(end);
+  if (!grupos.length) {
+    return { label, texto: "Você ainda não tem registros de sono nesta semana ("+label+"). Que tal começar registrando a noite de hoje?" };
+  }
+  const media = avg(grupos.map(g=>g.horasSonoReal));
+  const scoreMedia = avg(grupos.map(g=>g.score));
+  const cat = categoriaPorScore(Math.round(scoreMedia));
+  const meta = state.parametros.metaHorasSono;
+  const desv = analisarConstancia(grupos);
+  const remProfundo = analisarRemProfundo(grupos);
+
+  let texto = "Na semana de "+label+", você tem "+grupos.length+" noite"+(grupos.length>1?"s":"")+" registrada"+(grupos.length>1?"s":"")+", com média de "+fmtHoras(media)+" de sono real e score médio de "+Math.round(scoreMedia)+" ("+(cat?cat.label:"")+"). ";
+
+  if (media < meta - 0.4) {
+    texto += "Isso está "+fmtHoras(meta-media)+" abaixo da sua meta de "+fmtHoras(meta)+". ";
+  } else if (media >= meta) {
+    texto += "Você está atingindo ou superando sua meta de "+fmtHoras(meta)+". ";
+  }
+  if (desv && desv.desvDormir > 50) {
+    texto += "Seu horário de dormir variou bastante essa semana (~"+Math.round(desv.desvDormir)+" min de desvio). ";
+  }
+  if (remProfundo.mediaPctRem !== null && remProfundo.statusRem === "abaixo") {
+    texto += "Seu REM ficou abaixo do recomendado ("+remProfundo.mediaPctRem.toFixed(1)+"%). ";
+  }
+  return { label, texto };
+}
+
+function renderResumoIASemana(){
+  if (state.sonoResumoMinimizado) {
+    return '<button id="btn-expandir-resumo" class="insight-row" style="width:100%;text-align:left;cursor:pointer;margin-bottom:18px;">'+icon("bulb")+'<span>Resumo da semana (minimizado) — clique para expandir</span></button>';
+  }
+  const { label, texto } = gerarResumoSemanaCorrenteIA();
+  return '<div class="card" style="margin-bottom:24px;border-color:var(--purple);background:linear-gradient(135deg, rgba(108,99,255,0.08), rgba(77,143,255,0.04));">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">'+
+      '<div style="display:flex;gap:10px;">'+
+        '<div style="flex-shrink:0;color:var(--purple);margin-top:1px;">'+icon("bulb")+'</div>'+
+        '<div><p style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin:0 0 6px;">Resumo da semana · '+label+'</p>'+
+        '<p style="font-size:13.5px;line-height:1.6;margin:0;">'+texto+'</p></div>'+
+      '</div>'+
+      '<button id="btn-minimizar-resumo" class="icon-btn" aria-label="Minimizar" title="Minimizar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg></button>'+
+    '</div></div>';
+}
+
 function renderAnaliseSono(){
-  const regs = sonoUltimosN(60).filter(r=>r.horasSonoReal||calcDuracao(r.dormiu,r.acordou));
-  if (regs.length<2) return '<div class="empty-state">Registre ao menos 2 noites para ver as análises.</div>';
-  const media = mediaHorasSono(regs);
-  const desvDormir = desvioPadraoHorario(regs, "dormiu");
-  const scores = regs.map(scoreNoite).filter(s=>s!==null);
-  const scoreMedia = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
-  const dicas = gerarDicasSono();
-  return '<div class="grid grid-3" style="margin-bottom:8px;">'+
-      metricCard("Média de sono (60d)", fmtHoras(media)) +
-      metricCard("Consistência horário", Math.round(desvDormir)+" min") +
-      metricCard("Score médio", Math.round(scoreMedia)+"/100") +
+  if (!state.analiseView) state.analiseView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null };
+  const { start, end } = getPeriodoAtual("analiseView");
+
+  const grupos = gruposNoIntervalo(start, end).filter(g=>g.horasSonoReal>0);
+  const resumoIA = renderResumoIASemana();
+
+  if (!grupos.length) {
+    return resumoIA + renderPeriodSelector("analiseView") + '<div class="empty-state">Nenhum registro de sono no período selecionado.</div>';
+  }
+
+  const media = avg(grupos.map(g=>g.horasSonoReal));
+  const scoreMedia = avg(grupos.map(g=>g.score));
+  const remProfundo = analisarRemProfundo(grupos);
+  const constancia = analisarConstancia(grupos);
+
+  const dicasRem = gerarAnaliseRemProfundoIA(remProfundo);
+  const dicasConstancia = gerarAnaliseConstanciaIA(constancia);
+
+  return resumoIA +
+    renderPeriodSelector("analiseView") +
+    '<div class="grid grid-4" style="margin-bottom:24px;">'+
+      metricCard("Média de sono", fmtHoras(media), "moon") +
+      metricCard("Score médio", Math.round(scoreMedia)) +
+      metricCard("% Sono REM", remProfundo.mediaPctRem!==null ? remProfundo.mediaPctRem.toFixed(1)+"%" : "—") +
+      metricCard("% Sono profundo", remProfundo.mediaPctFundo!==null ? remProfundo.mediaPctFundo.toFixed(1)+"%" : "—") +
     '</div>'+
+
     '<div class="chart-wrap" style="height:220px;"><canvas id="chartHoras" role="img" aria-label="Gráfico de horas de sono por noite com linha de meta"></canvas></div>'+
     '<div class="chart-wrap" style="height:200px;"><canvas id="chartScore" role="img" aria-label="Gráfico de score de qualidade do sono por noite"></canvas></div>'+
-    '<div class="section-title">Dicas com base nos seus padrões</div>'+
-    dicas.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
+
+    '<div class="section-title">Sono REM e sono profundo — análise assistida por IA</div>'+
+    '<p style="font-size:12px;color:var(--text-faint);margin:-6px 0 12px;">Baseado em referências de organizações de sono (Sleep Foundation, CDC, National Sleep Foundation).</p>'+
+    dicasRem.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
+
+    '<div class="section-title">Constância do horário de sono — análise assistida por IA</div>'+
+    (constancia ? '<div class="grid grid-2" style="margin-bottom:16px;">'+
+      metricCard("Variação horário de dormir", Math.round(constancia.desvDormir)+" min") +
+      metricCard("Variação horário de acordar", Math.round(constancia.desvAcordar)+" min") +
+    '</div>' : '') +
+    dicasConstancia.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
 }
 
 function renderParametrosSono(){
@@ -869,11 +1044,12 @@ function attachRegistroSonoLiveCalc(){
 }
 
 function drawSonoCharts(){
-  const regs = sonoUltimosN(60).filter(r=>r.horasSonoReal||calcDuracao(r.dormiu,r.acordou));
+  const { start, end } = getPeriodoAtual("analiseView");
+  const regs = gruposNoIntervalo(start, end).filter(g=>g.horasSonoReal>0).sort((a,b)=>a.data.localeCompare(b.data));
   if (!regs.length) return;
   const labels = regs.map(r=>new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}));
-  const horas = regs.map(r=>Math.round((r.horasSonoReal||calcDuracao(r.dormiu,r.acordou))*10)/10);
-  const scores = regs.map(scoreNoite);
+  const horas = regs.map(r=>Math.round(r.horasSonoReal*10)/10);
+  const scores = regs.map(r=>r.score);
   const meta = state.parametros.metaHorasSono;
   const c1 = document.getElementById("chartHoras");
   if (c1) new Chart(c1, { type:"bar", data:{ labels:labels, datasets:[
@@ -943,23 +1119,25 @@ function attachHandlers(){
   document.querySelectorAll("[data-celulartab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.celularTab = btn.getAttribute("data-celulartab"); render(); }); });
   document.querySelectorAll("[data-leiturastab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.leiturasTab = btn.getAttribute("data-leiturastab"); render(); }); });
 
+  const btnMinimizarResumo = document.getElementById("btn-minimizar-resumo");
+  if (btnMinimizarResumo) btnMinimizarResumo.addEventListener("click", function(){ state.sonoResumoMinimizado = true; render(); });
+  const btnExpandirResumo = document.getElementById("btn-expandir-resumo");
+  if (btnExpandirResumo) btnExpandirResumo.addEventListener("click", function(){ state.sonoResumoMinimizado = false; render(); });
+
   document.querySelectorAll("[data-periodotipo]").forEach(function(btn){ btn.addEventListener("click", function(){
-    const tipo = btn.getAttribute("data-periodotipo");
-    state.sonoView = { tipo: tipo, offset: 0, dataInicio: state.sonoView.dataInicio, dataFim: state.sonoView.dataFim };
+    const [key, tipo] = btn.getAttribute("data-periodotipo").split(":");
+    state[key] = { tipo: tipo, offset: 0, dataInicio: state[key].dataInicio, dataFim: state[key].dataFim };
     render();
   }); });
-  const btnPrev = document.getElementById("btn-periodo-prev");
-  if (btnPrev) btnPrev.addEventListener("click", function(){ state.sonoView.offset--; render(); });
-  const btnNext = document.getElementById("btn-periodo-next");
-  if (btnNext) btnNext.addEventListener("click", function(){ state.sonoView.offset++; render(); });
-  const btnHoje = document.getElementById("btn-periodo-hoje");
-  if (btnHoje) btnHoje.addEventListener("click", function(){ state.sonoView.offset = 0; render(); });
-  const btnAplicarCustom = document.getElementById("btn-aplicar-custom");
-  if (btnAplicarCustom) btnAplicarCustom.addEventListener("click", function(){
-    state.sonoView.dataInicio = document.getElementById("custom-data-inicio").value;
-    state.sonoView.dataFim = document.getElementById("custom-data-fim").value;
+  document.querySelectorAll("[data-periodoprev]").forEach(function(btn){ btn.addEventListener("click", function(){ const key = btn.getAttribute("data-periodoprev"); state[key].offset--; render(); }); });
+  document.querySelectorAll("[data-periodonext]").forEach(function(btn){ btn.addEventListener("click", function(){ const key = btn.getAttribute("data-periodonext"); state[key].offset++; render(); }); });
+  document.querySelectorAll("[data-periodohoje]").forEach(function(btn){ btn.addEventListener("click", function(){ const key = btn.getAttribute("data-periodohoje"); state[key].offset = 0; render(); }); });
+  document.querySelectorAll("[data-aplicarcustom]").forEach(function(btn){ btn.addEventListener("click", function(){
+    const key = btn.getAttribute("data-aplicarcustom");
+    state[key].dataInicio = document.getElementById("custom-data-inicio-"+key).value;
+    state[key].dataFim = document.getElementById("custom-data-fim-"+key).value;
     render();
-  });
+  }); });
 
   const btnAddCochilo = document.getElementById("btn-add-cochilo");
   if (btnAddCochilo) btnAddCochilo.addEventListener("click", function(){
