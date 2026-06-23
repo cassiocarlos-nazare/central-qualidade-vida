@@ -216,6 +216,13 @@ const DB = {
   }
 };
 
+function rowCelularDiarioToApp(r){
+  return { id: r.id, data: r.data, horasConsumo: Number(r.horas_consumo), horasMaps: Number(r.horas_maps) };
+}
+function appCelularDiarioToRow(c){
+  return { id: (c.id && c.id.length===36)?c.id:undefined, data: c.data, horas_consumo: c.horasConsumo, horas_maps: c.horasMaps||0 };
+}
+
 Object.assign(DB, {
   async getBioimpedancia(){
     const { data, error } = await sb.from("bioimpedancia").select("*").order("data_medicao", { ascending: true });
@@ -297,6 +304,38 @@ Object.assign(DB, {
   async deleteMovimentacao(id){
     const { error } = await sb.from("movimentacao_diaria").delete().eq("id", id);
     if (error) { console.error("Erro ao excluir movimentação:", error); return false; }
+    return true;
+  }
+});
+
+Object.assign(DB, {
+  async getCelularDiario(){
+    const { data, error } = await sb.from("registros_celular_diario").select("*").order("data", { ascending: true });
+    if (error) { console.error("Erro ao buscar celular diário:", error); return []; }
+    return data.map(rowCelularDiarioToApp);
+  },
+  async upsertCelularDiario(c){
+    const row = appCelularDiarioToRow(c);
+    const { data, error } = await sb.from("registros_celular_diario").upsert(row, { onConflict: "data" }).select().single();
+    if (error) { console.error("Erro ao salvar celular diário:", error); return null; }
+    return rowCelularDiarioToApp(data);
+  },
+  async deleteCelularDiario(id){
+    const { error } = await sb.from("registros_celular_diario").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir celular diário:", error); return false; }
+    return true;
+  },
+
+  async getSemanasFechadas(){
+    const { data, error } = await sb.from("celular_semanas_fechadas").select("*");
+    if (error) { console.error("Erro ao buscar semanas fechadas:", error); return {}; }
+    const map = {};
+    data.forEach(function(r){ map[r.semana_inicio] = r.fechada; });
+    return map;
+  },
+  async setSemanaFechada(semanaInicio, fechada){
+    const { error } = await sb.from("celular_semanas_fechadas").upsert({ semana_inicio: semanaInicio, fechada: fechada }, { onConflict: "semana_inicio" });
+    if (error) { console.error("Erro ao salvar estado da semana:", error); return false; }
     return true;
   }
 });

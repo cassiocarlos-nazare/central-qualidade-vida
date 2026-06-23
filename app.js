@@ -42,6 +42,8 @@ let state = {
   bioimpedancia: [],
   pesos: [],
   movimentacao: [],
+  celularDiario: [],
+  semanasFechadasCelularMap: {},
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -161,8 +163,8 @@ async function loadData(){
       state.parametros = Object.assign({}, state.parametros, parametrosSalvos.gerais);
     }
 
-    const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao] = await Promise.all([
-      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao()
+    const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap] = await Promise.all([
+      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -171,6 +173,8 @@ async function loadData(){
     state.bioimpedancia = bioimpedancia;
     state.pesos = pesos;
     state.movimentacao = movimentacao;
+    state.celularDiario = celularDiario;
+    state.semanasFechadasCelularMap = semanasFechadasCelularMap;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -208,6 +212,17 @@ function fmtHoras(h){
   if (h===null||h===undefined||isNaN(h)) return "—";
   const horas = Math.floor(h), min = Math.round((h-horas)*60);
   return horas + "h" + (min>0 ? (min<10?"0"+min:min)+"m" : "");
+}
+function decimalParaHora(dec){
+  if (dec===null||dec===undefined||isNaN(dec)) return "07:30";
+  const h = Math.floor(dec), m = Math.round((dec-h)*60);
+  return (h<10?"0":"")+h+":"+(m<10?"0":"")+m;
+}
+function horaParaDecimal(hhmm){
+  if (!hhmm) return null;
+  const parts = hhmm.split(":");
+  if (parts.length!==2) return null;
+  return Number(parts[0]) + Number(parts[1])/60;
 }
 
 function scoreNoite(reg){
@@ -472,9 +487,9 @@ function renderSidebar(){
     '<div class="profile-card"><div class="avatar">CN</div><div><div class="profile-name">'+PROFILE.nome+'</div><div class="profile-meta">'+idade+' anos · '+PROFILE.cidade+'</div></div></div>';
 }
 
-function metricCard(label, value, iconName, delta){
+function metricCard(label, value, iconName, delta, valueColor){
   return '<div class="metric-card"><div class="metric-label">'+(iconName?'<span>'+icon(iconName)+'</span>':'')+label+'</div>'+
-    '<div class="metric-value">'+value+'</div>'+
+    '<div class="metric-value" '+(valueColor?'style="color:'+valueColor+';"':'')+'>'+value+'</div>'+
     (delta ? '<div class="metric-delta '+delta.type+'">'+icon(delta.type==="up"?"up":delta.type==="down"?"down":"dash")+delta.text+'</div>' : '')+
     '</div>';
 }
@@ -623,9 +638,11 @@ function renderDashboardSono(){
   grupos.forEach(function(g){ const c = categoriaPorScore(g.score); if (c) counts[c.id]++; });
   const total = grupos.length;
 
+  const categoriaQualidade = mediaQualidade!==null ? categoriaPorScore(Math.round(mediaQualidade)) : null;
+
   return renderPeriodSelector() +
     '<div class="grid grid-4" style="margin-bottom:24px;">'+
-      metricCard("Qualidade do sono", mediaQualidade!==null?Math.round(mediaQualidade):"—", "moon") +
+      metricCard("Qualidade do sono", mediaQualidade!==null?Math.round(mediaQualidade):"—", "moon", null, categoriaQualidade?categoriaQualidade.color:null) +
       metricCard("Horário foi dormir", mediaDormiu||"—") +
       metricCard("Horário acordou", mediaAcordou||"—") +
       metricCard("Sono total", fmtHoras(mediaTotal)) +
@@ -894,7 +911,7 @@ function renderAnaliseSono(){
 function renderParametrosSono(){
   const p = state.parametros;
   return '<div class="form-grid">'+
-    field("Meta de horas de sono por noite", '<input type="number" id="p-meta" value="'+p.metaHorasSono+'" min="4" max="12" step="0.5" />') +
+    field("Meta de horas de sono por noite", '<input type="time" id="p-meta" value="'+decimalParaHora(p.metaHorasSono)+'" />') +
     field("Horário ideal para dormir", '<input type="time" id="p-dormir" value="'+p.horaDormirIdeal+'" />') +
     field("Horário ideal para acordar", '<input type="time" id="p-acordar" value="'+p.horaAcordarIdeal+'" />') +
     '<button class="btn btn-ghost" id="btn-salvar-param-sono">'+icon("check")+' Salvar parâmetros</button>'+
@@ -915,42 +932,186 @@ function renderSono(){
     ) + '</div>';
 }
 
+// ---------- Módulo: Uso do celular (registros diários) ----------
+
+const CATEGORIAS_CELULAR = [
+  { id: "excelente", label: "Excelente", min: 0, max: 10, color: "#39FF8B" },
+  { id: "otimo", label: "Ótimo", min: 10.0001, max: 15, color: "#4ED9A0" },
+  { id: "bom", label: "Bom", min: 15.0001, max: 20, color: "#4D8FFF" },
+  { id: "regular", label: "Regular", min: 20.0001, max: 25, color: "#F2D94B" },
+  { id: "ruim", label: "Ruim", min: 25.0001, max: 30, color: "#F2A23C" },
+  { id: "pessimo", label: "Péssimo", min: 30.0001, max: Infinity, color: "#F2685B" }
+];
+function categoriaCelularPorHoras(horas){
+  if (horas===null||horas===undefined) return null;
+  return CATEGORIAS_CELULAR.find(function(c){ return horas>=c.min && horas<=c.max; }) || CATEGORIAS_CELULAR[CATEGORIAS_CELULAR.length-1];
+}
+
+function celularHorasNet(reg){ return Math.max(0, (reg.horasConsumo||0) - (reg.horasMaps||0)); }
+function celularOrdenado(){ return [...state.celularDiario].sort(function(a,b){ return a.data.localeCompare(b.data); }); }
+function celularNoIntervalo(startIso, endIso){ return state.celularDiario.filter(function(r){ return r.data>=startIso && r.data<=endIso; }); }
+
+function sonoRealNoDia(dataIso){
+  const grupos = gruposSonoNoPeriodo(state.registrosSono.filter(function(r){ return r.grupoData===dataIso; }));
+  const g = grupos.find(function(x){ return x.data===dataIso; });
+  return g ? g.horasSonoReal : null;
+}
+
+function pctAcordadoUsando(horasUso, dataIso){
+  const sonoReal = sonoRealNoDia(dataIso);
+  const horasSono = (sonoReal!==null && sonoReal>0) ? sonoReal : state.parametros.metaHorasSono;
+  const horasAcordado = 24 - horasSono;
+  if (horasAcordado<=0) return null;
+  return (horasUso/horasAcordado)*100;
+}
+
+function renderDashboardCelularAno(){
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const inicioAno = isoDate(new Date(anoAtual,0,1));
+  const hojeIso = isoDate(hoje);
+  const diasDoAno = Math.floor((hoje - new Date(anoAtual,0,1))/(24*3600*1000)) + 1;
+
+  const regsAno = celularNoIntervalo(inicioAno, hojeIso);
+  const totalHoras = regsAno.reduce(function(s,r){ return s+celularHorasNet(r); }, 0);
+  const mediaConsumo = regsAno.length ? totalHoras/regsAno.length : null;
+  const qtdDiasUsando = totalHoras/24;
+  const pctDiasAno = diasDoAno ? (regsAno.length/diasDoAno)*100 : 0;
+
+  const porMes = {};
+  regsAno.forEach(function(r){
+    const mes = r.data.slice(0,7);
+    if (!porMes[mes]) porMes[mes] = { total:0, dias:0 };
+    porMes[mes].total += celularHorasNet(r);
+    porMes[mes].dias++;
+  });
+  const mesesOrdenados = Object.keys(porMes).sort().reverse();
+
+  return '<div class="grid grid-4" style="margin-bottom:8px;">'+
+      metricCard("Dia atual", hoje.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"})) +
+      metricCard("Dias do ano (até hoje)", diasDoAno) +
+      metricCard("Total de horas no ano", fmtHoras(totalHoras)) +
+      metricCard("Média de consumo no ano", mediaConsumo!==null?fmtHoras(mediaConsumo)+"/dia":"—") +
+    '</div>'+
+    '<div class="grid grid-2" style="margin-bottom:24px;">'+
+      metricCard("Dias equivalentes usando celular", qtdDiasUsando.toFixed(2)+" dias") +
+      metricCard("% do ano usando celular", pctDiasAno.toFixed(1)+"%") +
+    '</div>'+
+    '<div class="section-title" style="margin-top:0;">Consumo mensal</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:13px;">'+
+      '<thead><tr style="color:var(--text-dim);text-align:left;"><th style="padding:8px 10px;font-weight:500;">Mês</th><th style="padding:8px 10px;font-weight:500;text-align:right;">Total</th><th style="padding:8px 10px;font-weight:500;text-align:right;">Média/dia</th></tr></thead>'+
+      '<tbody>'+ mesesOrdenados.map(function(mes){
+        const d = porMes[mes];
+        const label = capitalizeMonthLabel(new Date(mes+"-02").toLocaleDateString("pt-BR",{month:"long",year:"numeric"}));
+        return '<tr style="border-top:1px solid var(--border);"><td style="padding:8px 10px;">'+label+'</td>'+
+          '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);">'+fmtHoras(d.total)+'</td>'+
+          '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);">'+fmtHoras(d.total/d.dias)+'</td></tr>';
+      }).join("") + '</tbody></table>';
+}
+
 function renderRegistroCelularForm(){
   const dataStr = new Date().toISOString().slice(0,10);
   return '<div class="form-grid">'+
     field("Data", '<input type="date" id="fc-data" value="'+dataStr+'" />') +
-    field("Tempo de tela no dia (horas)", '<input type="number" id="fc-horas" value="2" min="0" max="20" step="0.1" />') +
-    field("Principal motivo de uso", '<select id="fc-motivo"><option>Trabalho</option><option>Redes sociais</option><option>Mensagens</option><option>Entretenimento</option><option>Outro</option></select>') +
+    field("Tempo de consumo do celular (horas)", '<input type="text" id="fc-horas" placeholder="ex: 3:30" value="2:00" />') +
+    field("Tempo de Google Maps (horas)", '<input type="text" id="fc-maps" placeholder="ex: 0:40" value="0:00" />') +
+    '<div class="field"><label class="field-label">Tempo líquido de uso do celular</label><div id="fc-liquido-out" style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);padding:10px 0;">—</div></div>'+
     '<button class="btn btn-primary" id="btn-salvar-celular">'+icon("check")+' Salvar registro diário</button>'+
-    '<div class="toast" id="msg-salvo-celular" style="display:none;">'+icon("check")+' Registro salvo</div>'+
-    '<p style="font-size:12px;color:var(--text-faint);">O histórico semanal importado continua disponível na aba histórico. Novos registros alimentam a semana corrente.</p></div>';
+    '<div class="toast" id="msg-salvo-celular" style="display:none;">'+icon("check")+' Registro salvo</div></div>';
 }
 
-function renderHistoricoCelular(){
-  const semanas = [...state.registrosCelular].sort((a,b)=>b.semana-a.semana);
-  if (!semanas.length) return '<div class="empty-state">Nenhum dado ainda.</div>';
-  return semanas.map(function(s){
-    const acima = s.mediaDiaria > state.parametros.metaCelularHoras;
-    return '<div class="list-row"><div class="list-row-main"><div class="list-row-title">Semana '+s.periodo+'</div>'+
-      '<div class="list-row-sub">total semanal '+fmtHoras(s.totalSemanal)+'</div></div>'+
-      '<div class="badge '+(acima?"badge-bad":"badge-good")+'">'+fmtHoras(s.mediaDiaria)+'/dia</div></div>';
-  }).join("");
+function renderFiltroCelular(){
+  if (!state.celularAnaliseView) state.celularAnaliseView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null };
+  const v = state.celularAnaliseView;
+  const tipos = [{id:"mes",label:"Mês"},{id:"semana",label:"Semana"},{id:"ano",label:"Ano"},{id:"custom",label:"Período"}];
+  let nav = "";
+  if (v.tipo === "ano") {
+    nav = '<div style="font-size:13.5px;font-weight:500;">'+new Date().getFullYear()+'</div>';
+  } else if (v.tipo !== "custom") {
+    const { label } = getPeriodoAtual("celularAnaliseView");
+    nav = '<div style="display:flex;align-items:center;gap:8px;">'+
+      '<button class="icon-btn" data-periodoprev="celularAnaliseView" aria-label="Período anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>'+
+      '<div style="font-size:13.5px;font-weight:500;min-width:150px;text-align:center;">'+label+'</div>'+
+      '<button class="icon-btn" data-periodonext="celularAnaliseView" aria-label="Próximo período"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>'+
+      (v.offset !== 0 ? '<button class="btn btn-ghost" data-periodohoje="celularAnaliseView" style="padding:6px 12px;font-size:12px;">Hoje</button>' : '') +
+      '</div>';
+  } else {
+    const di = v.dataInicio || isoDate(startOfMonth(new Date()));
+    const df = v.dataFim || isoDate(new Date());
+    nav = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
+      '<input type="date" id="custom-data-inicio-celularAnaliseView" value="'+di+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
+      '<span style="color:var(--text-faint);font-size:13px;">até</span>'+
+      '<input type="date" id="custom-data-fim-celularAnaliseView" value="'+df+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
+      '<button class="btn btn-ghost" data-aplicarcustom="celularAnaliseView" style="padding:8px 14px;font-size:12.5px;">Aplicar</button>'+
+      '</div>';
+  }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;">'+
+    '<div class="tabs" style="border-bottom:none;margin-bottom:0;">'+
+      tipos.map(function(t){ return '<button class="tab-btn '+(v.tipo===t.id?'is-active':'')+'" data-periodotipo="celularAnaliseView:'+t.id+'" style="padding:7px 12px;">'+t.label+'</button>'; }).join("")+
+    '</div>'+ nav +
+  '</div>';
+}
+
+function celularGetPeriodoAnalise(){
+  const v = state.celularAnaliseView;
+  if (v.tipo === "ano") {
+    const hoje = new Date();
+    return { start: new Date(hoje.getFullYear(),0,1), end: hoje, label: String(hoje.getFullYear()) };
+  }
+  return getPeriodoAtual("celularAnaliseView");
 }
 
 function renderAnaliseCelular(){
-  const semanas = [...state.registrosCelular].sort((a,b)=>a.semana-b.semana);
-  if (semanas.length<2) return '<div class="empty-state">Dados insuficientes para análise.</div>';
-  const meta = state.parametros.metaCelularHoras;
-  const mediaGeral = semanas.reduce((s,r)=>s+r.mediaDiaria,0)/semanas.length;
-  const ultimasQuatro = semanas.slice(-4);
-  const mediaRecente = ultimasQuatro.reduce((s,r)=>s+r.mediaDiaria,0)/ultimasQuatro.length;
-  const semanasAcimaMeta = semanas.filter(s=>s.mediaDiaria>meta).length;
-  return '<div class="grid grid-3" style="margin-bottom:8px;">'+
-      metricCard("Média geral 2026", fmtHoras(mediaGeral)+"/dia") +
-      metricCard("Média últimas 4 sem.", fmtHoras(mediaRecente)+"/dia") +
-      metricCard("Semanas acima da meta", semanasAcimaMeta+" de "+semanas.length) +
+  if (!state.celularAnaliseView) state.celularAnaliseView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null };
+  const { start, end } = celularGetPeriodoAnalise();
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const regs = celularNoIntervalo(startIso, endIso);
+
+  if (!regs.length) return renderFiltroCelular() + '<div class="empty-state">Nenhum registro de celular no período selecionado.</div>';
+
+  const totalHoras = regs.reduce(function(s,r){ return s+celularHorasNet(r); }, 0);
+  const mediaConsumo = totalHoras/regs.length;
+  const pctAcordadoVals = regs.map(function(r){ return pctAcordadoUsando(celularHorasNet(r), r.data); }).filter(function(v){ return v!==null; });
+  const mediaPctAcordado = pctAcordadoVals.length ? avg(pctAcordadoVals) : null;
+
+  const counts = {};
+  CATEGORIAS_CELULAR.forEach(function(c){ counts[c.id]=0; });
+  // Para o gráfico por categoria, agrupamos por semana (já que a categoria é definida pelo TOTAL semanal)
+  const porSemana = {};
+  regs.forEach(function(r){
+    const s = isoDate(startOfWeek(new Date(r.data+"T00:00:00")));
+    if (!porSemana[s]) porSemana[s] = 0;
+    porSemana[s] += celularHorasNet(r);
+  });
+  Object.keys(porSemana).forEach(function(s){
+    const cat = categoriaCelularPorHoras(porSemana[s]);
+    if (cat) counts[cat.id]++;
+  });
+  const totalSemanas = Object.keys(porSemana).length;
+
+  return renderFiltroCelular() +
+    '<div class="grid grid-3" style="margin-bottom:24px;">'+
+      metricCard("Média de consumo", fmtHoras(mediaConsumo)+"/dia") +
+      metricCard("Total de horas", fmtHoras(totalHoras)) +
+      metricCard("% horas acordado em uso", mediaPctAcordado!==null?mediaPctAcordado.toFixed(1)+"%":"—") +
     '</div>'+
-    '<div class="chart-wrap" style="height:220px;"><canvas id="chartCelular" role="img" aria-label="Gráfico de uso médio diário de celular por semana com linha de meta"></canvas></div>';
+    '<div class="grid grid-2" style="align-items:start;">'+
+      '<div>'+
+        '<div class="section-title" style="margin-top:0;">Tempo de uso por categoria (semanas)</div>'+
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'+
+          '<thead><tr style="color:var(--text-dim);text-align:left;"><th style="padding:8px 10px;font-weight:500;">Categoria</th><th style="padding:8px 10px;font-weight:500;text-align:right;">Semanas</th></tr></thead>'+
+          '<tbody>'+ CATEGORIAS_CELULAR.map(function(c){
+            return '<tr style="border-top:1px solid var(--border);"><td style="padding:8px 10px;"><span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;background:'+c.color+';display:inline-block;"></span>'+c.label+'</span></td>'+
+              '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);">'+counts[c.id]+'</td></tr>';
+          }).join("") +
+          '<tr style="border-top:1px solid var(--border-strong);"><td style="padding:8px 10px;font-weight:500;">Total</td><td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;">'+totalSemanas+'</td></tr>'+
+          '</tbody></table>'+
+      '</div>'+
+      '<div>'+
+        '<div class="section-title" style="margin-top:0;">Distribuição por categoria</div>'+
+        '<div class="chart-wrap" style="height:240px;"><canvas id="chartCategoriaCelular" role="img" aria-label="Gráfico de distribuição de semanas por categoria de uso de celular"></canvas></div>'+
+      '</div>'+
+    '</div>';
 }
 
 function renderParametrosCelular(){
@@ -961,13 +1122,60 @@ function renderParametrosCelular(){
     '<div class="toast" id="msg-param-celular" style="display:none;">'+icon("check")+' Parâmetros atualizados</div></div>';
 }
 
+function renderHistoricoCelular(){
+  const regs = celularOrdenado();
+  if (!regs.length) return '<div class="empty-state">Nenhum registro ainda.</div>';
+
+  const porSemana = {};
+  regs.forEach(function(r){
+    const s = isoDate(startOfWeek(new Date(r.data+"T00:00:00")));
+    if (!porSemana[s]) porSemana[s] = [];
+    porSemana[s].push(r);
+  });
+  const semanaAtualIso = isoDate(startOfWeek(new Date()));
+  const semanasOrdenadas = Object.keys(porSemana).sort().reverse();
+
+  return semanasOrdenadas.map(function(semanaIso){
+    const itens = porSemana[semanaIso];
+    const totalHoras = itens.reduce(function(s,r){ return s+celularHorasNet(r); }, 0);
+    const mediaHorasSem = totalHoras/itens.length;
+    const cat = categoriaCelularPorHoras(totalHoras);
+    const inicio = new Date(semanaIso+"T00:00:00");
+    const fim = new Date(inicio); fim.setDate(fim.getDate()+6);
+    const labelSemana = inicio.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + " a " + fim.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
+
+    const isSemanaAtual = semanaIso === semanaAtualIso;
+    const overrideExiste = state.semanasFechadasCelularMap && (semanaIso in state.semanasFechadasCelularMap);
+    const aberta = overrideExiste ? !state.semanasFechadasCelularMap[semanaIso] : isSemanaAtual;
+
+    const header = '<div class="list-row" style="cursor:pointer;" data-togglesemanacelular="'+semanaIso+'">'+
+      '<div class="list-row-main"><div class="list-row-title">Semana de '+labelSemana+'</div>'+
+      '<div class="list-row-sub">total '+fmtHoras(totalHoras)+' · média '+fmtHoras(mediaHorasSem)+'/dia</div></div>'+
+      '<div class="badge" style="background:'+(cat?cat.color+'22':'')+';color:'+(cat?cat.color:'var(--text-dim)')+';">'+(cat?cat.label:"—")+'</div>'+
+      '<button class="icon-btn" aria-label="'+(aberta?'Fechar':'Abrir')+' semana">'+(aberta?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>')+'</button>'+
+      '</div>';
+
+    const detalhes = aberta ? [...itens].sort(function(a,b){ return b.data.localeCompare(a.data); }).map(function(r){
+      const dataFmt = new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",weekday:"short"});
+      const liquido = celularHorasNet(r);
+      return '<div class="list-row" style="margin-left:20px;background:transparent;border-style:dashed;"><div class="list-row-main">'+
+        '<div class="list-row-title" style="font-size:12.5px;font-weight:400;color:var(--text-dim);">'+dataFmt+'</div>'+
+        '<div class="list-row-sub">consumo '+fmtHoras(r.horasConsumo)+' · maps '+fmtHoras(r.horasMaps)+' · líquido '+fmtHoras(liquido)+'</div></div>'+
+        '<button class="icon-btn" data-delcelular="'+r.id+'" aria-label="Excluir registro">'+icon("trash")+'</button></div>';
+    }).join("") : "";
+
+    return header + detalhes;
+  }).join("");
+}
+
 function renderCelular(){
-  if (!state.celularTab) state.celularTab = "registro";
-  const tabs = [{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"},{id:"analise",label:"Análises"},{id:"parametros",label:"Parâmetros"}];
+  if (!state.celularTab) state.celularTab = "dashboard";
+  const tabs = [{id:"dashboard",label:"Dashboard"},{id:"registro",label:"Registrar"},{id:"historico",label:"Histórico"},{id:"analise",label:"Análises"},{id:"parametros",label:"Parâmetros"}];
   return backLink() +
     '<div class="page-header"><div class="page-title">Uso do celular</div></div>'+
     tabsHtml(tabs, state.celularTab, "celulartab") +
     '<div id="celular-content">' + (
+      state.celularTab==="dashboard" ? renderDashboardCelularAno() :
       state.celularTab==="registro" ? renderRegistroCelularForm() :
       state.celularTab==="historico" ? renderHistoricoCelular() :
       state.celularTab==="analise" ? renderAnaliseCelular() : renderParametrosCelular()
@@ -1450,7 +1658,11 @@ function render(){
   }
   if (state.view === "inicio") content.innerHTML = renderInicio();
   else if (state.view === "sono") { content.innerHTML = renderSono(); if (state.sonoTab==="analise") setTimeout(drawSonoCharts,0); if (state.sonoTab==="dashboard") setTimeout(drawCategoriaSonoChart,0); if (state.sonoTab==="registro") setTimeout(attachRegistroSonoLiveCalc,0); }
-  else if (state.view === "celular") { content.innerHTML = renderCelular(); if (state.celularTab==="analise") setTimeout(drawCelularChart,0); }
+  else if (state.view === "celular") {
+    content.innerHTML = renderCelular();
+    if (state.celularTab==="analise") setTimeout(drawCategoriaCelularChart,0);
+    if (state.celularTab==="registro") setTimeout(attachRegistroCelularLiveCalc,0);
+  }
   else if (state.view === "leituras") { content.innerHTML = renderLeituras(); if (state.leiturasTab==="analise") setTimeout(drawLivrosChart,0); }
   else if (state.view === "analises") { content.innerHTML = renderAnalisesGerais(); setTimeout(drawCruzadoChart,0); }
   else if (state.view === "exercicios") {
@@ -1475,12 +1687,32 @@ function drawCategoriaSonoChart(){
   const total = grupos.length;
   const c = document.getElementById("chartCategoriaSono");
   if (!c) return;
+  const plugins = (typeof ChartDataLabels !== "undefined") ? [ChartDataLabels] : [];
   new Chart(c, { type:"doughnut", data:{
     labels: CATEGORIAS_SONO.map(c=>c.label),
     datasets:[{ data: CATEGORIAS_SONO.map(cat=>Math.round((counts[cat.id]/total)*1000)/10), backgroundColor: CATEGORIAS_SONO.map(c=>c.color), borderWidth: 0 }]
-  }, options:{ responsive:true, maintainAspectRatio:false, cutout:"62%",
+  }, plugins: plugins, options:{ responsive:true, maintainAspectRatio:false, cutout:"62%",
     plugins:{ legend:{ position:"bottom", labels:{ color:"#8A8FA3", font:{size:11}, boxWidth:10, padding:12 } },
-      tooltip:{ callbacks:{ label: function(ctx){ return ctx.label+": "+ctx.parsed+"%"; } } } } } });
+      tooltip:{ callbacks:{ label: function(ctx){ return ctx.label+": "+ctx.parsed+"%"; } } },
+      datalabels:{ display: function(ctx){ return ctx.dataset.data[ctx.dataIndex] > 0; }, color:"#0B0E14", font:{ weight:"600", size:11 }, formatter: function(v){ return v+"%"; } }
+    } } });
+}
+
+function attachRegistroCelularLiveCalc(){
+  const horasEl = document.getElementById("fc-horas");
+  const mapsEl = document.getElementById("fc-maps");
+  if (!horasEl) return;
+  function recalc(){
+    const total = parseHM(horasEl.value);
+    const maps = parseHM(mapsEl.value);
+    const out = document.getElementById("fc-liquido-out");
+    if (total!==null) {
+      const liquido = Math.max(0, total - (maps||0));
+      out.textContent = fmtHoras(liquido);
+    } else { out.textContent = "—"; }
+  }
+  [horasEl, mapsEl].forEach(function(el){ el.addEventListener("input", recalc); });
+  recalc();
 }
 
 function attachRegistroSonoLiveCalc(){
@@ -1525,16 +1757,33 @@ function drawSonoCharts(){
   const c2 = document.getElementById("chartScore");
   if (c2) new Chart(c2, { type:"line", data:{ labels:labels, datasets:[{ label:"Score", data:scores, borderColor:"#6C63FF", backgroundColor:"rgba(108,99,255,0.12)", fill:true, tension:0.3, pointRadius:2 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:Object.assign({ticks:{autoSkip:true,maxRotation:45,color:"#8A8FA3",font:{size:10}}},{grid:{display:false}}), y:Object.assign({min:0,max:100},baseGridOpts()) } } });
 }
-function drawCelularChart(){
-  const semanas = [...state.registrosCelular].sort((a,b)=>a.semana-b.semana);
-  const labels = semanas.map(s=>s.periodo.split(" a ")[0]);
-  const valores = semanas.map(s=>Math.round(s.mediaDiaria*10)/10);
-  const meta = state.parametros.metaCelularHoras;
-  const c = document.getElementById("chartCelular");
-  if (c) new Chart(c, { type:"line", data:{ labels:labels, datasets:[
-    { label:"Média diária", data:valores, borderColor:"#4D8FFF", backgroundColor:"rgba(77,143,255,0.12)", fill:true, tension:0.3, pointRadius:2 },
-    { label:"Meta", data:labels.map(()=>meta), borderColor:"#F2685B", borderDash:[6,4], pointRadius:0, fill:false }
-  ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:Object.assign({ticks:{autoSkip:true,maxRotation:45,color:"#8A8FA3",font:{size:10}}},{grid:{display:false}}), y:Object.assign({beginAtZero:true},baseGridOpts()) } } });
+function drawCategoriaCelularChart(){
+  const { start, end } = celularGetPeriodoAnalise();
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const regs = celularNoIntervalo(startIso, endIso);
+  if (!regs.length) return;
+  const porSemana = {};
+  regs.forEach(function(r){
+    const s = isoDate(startOfWeek(new Date(r.data+"T00:00:00")));
+    if (!porSemana[s]) porSemana[s] = 0;
+    porSemana[s] += celularHorasNet(r);
+  });
+  const counts = {};
+  CATEGORIAS_CELULAR.forEach(function(c){ counts[c.id]=0; });
+  Object.keys(porSemana).forEach(function(s){ const cat = categoriaCelularPorHoras(porSemana[s]); if (cat) counts[cat.id]++; });
+  const total = Object.keys(porSemana).length;
+  if (!total) return;
+  const c = document.getElementById("chartCategoriaCelular");
+  if (!c) return;
+  const plugins = (typeof ChartDataLabels !== "undefined") ? [ChartDataLabels] : [];
+  new Chart(c, { type:"doughnut", data:{
+    labels: CATEGORIAS_CELULAR.map(function(c){ return c.label; }),
+    datasets:[{ data: CATEGORIAS_CELULAR.map(function(cat){ return Math.round((counts[cat.id]/total)*1000)/10; }), backgroundColor: CATEGORIAS_CELULAR.map(function(c){ return c.color; }), borderWidth: 0 }]
+  }, plugins: plugins, options:{ responsive:true, maintainAspectRatio:false, cutout:"62%",
+    plugins:{ legend:{ position:"bottom", labels:{ color:"#8A8FA3", font:{size:11}, boxWidth:10, padding:12 } },
+      tooltip:{ callbacks:{ label: function(ctx){ return ctx.label+": "+ctx.parsed+"%"; } } },
+      datalabels:{ display: function(ctx){ return ctx.dataset.data[ctx.dataIndex] > 0; }, color:"#0B0E14", font:{ weight:"600", size:11 }, formatter: function(v){ return v+"%"; } }
+    } } });
 }
 function drawLivrosChart(){
   const livros = state.livros.filter(l=>l.titulo && l.paginas);
@@ -1707,7 +1956,7 @@ function attachHandlers(){
 
   const btnParamSono = document.getElementById("btn-salvar-param-sono");
   if (btnParamSono) btnParamSono.addEventListener("click", async function(){
-    state.parametros.metaHorasSono = Number(document.getElementById("p-meta").value)||7.5;
+    state.parametros.metaHorasSono = horaParaDecimal(document.getElementById("p-meta").value) || 7.5;
     state.parametros.horaDormirIdeal = document.getElementById("p-dormir").value;
     state.parametros.horaAcordarIdeal = document.getElementById("p-acordar").value;
     await saveParametros();
@@ -1718,23 +1967,40 @@ function attachHandlers(){
   const btnSalvarCelular = document.getElementById("btn-salvar-celular");
   if (btnSalvarCelular) btnSalvarCelular.addEventListener("click", async function(){
     const dataStr = document.getElementById("fc-data").value;
-    const horas = Number(document.getElementById("fc-horas").value)||0;
-    const d = new Date(dataStr+"T00:00:00");
-    const semanaAprox = Math.floor((d - new Date("2026-01-01"))/(7*24*3600*1000));
-    let semana = state.registrosCelular.find(s=>s.semana===semanaAprox);
+    const horasConsumo = parseHM(document.getElementById("fc-horas").value);
+    const horasMaps = parseHM(document.getElementById("fc-maps").value) || 0;
+    if (horasConsumo===null) return;
     btnSalvarCelular.disabled = true;
-    if (!semana) {
-      semana = { semana:semanaAprox, periodo:dataStr, mediaDiaria:horas, totalSemanal:horas, importado:false, dias:1 };
-      const salvo = await saveCelular(semana);
-      if (salvo) state.registrosCelular.push(salvo);
-    } else {
-      semana.dias = (semana.dias||1)+1; semana.totalSemanal += horas; semana.mediaDiaria = semana.totalSemanal/semana.dias;
-      await saveCelular(semana);
+    const existente = state.celularDiario.find(function(r){ return r.data===dataStr; });
+    const reg = { data: dataStr, horasConsumo: horasConsumo, horasMaps: horasMaps };
+    if (existente) reg.id = existente.id;
+    const salvo = await DB.upsertCelularDiario(reg);
+    if (salvo) {
+      state.celularDiario = state.celularDiario.filter(function(r){ return r.data!==dataStr; });
+      state.celularDiario.push(salvo);
     }
     btnSalvarCelular.disabled = false;
     const msg = document.getElementById("msg-salvo-celular");
     if (msg) { msg.style.display="flex"; setTimeout(()=>{ if(msg) msg.style.display="none"; },2500); }
   });
+
+  document.querySelectorAll("[data-delcelular]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delcelular");
+    await DB.deleteCelularDiario(id);
+    state.celularDiario = state.celularDiario.filter(function(r){ return r.id!==id; });
+    render();
+  }); });
+
+  document.querySelectorAll("[data-togglesemanacelular]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const semanaIso = btn.getAttribute("data-togglesemanacelular");
+    const semanaAtualIso = isoDate(startOfWeek(new Date()));
+    const overrideExiste = semanaIso in state.semanasFechadasCelularMap;
+    const estaAbertaAgora = overrideExiste ? !state.semanasFechadasCelularMap[semanaIso] : semanaIso===semanaAtualIso;
+    const novoFechada = estaAbertaAgora; // se estava aberta, fecha; se estava fechada, abre
+    await DB.setSemanaFechada(semanaIso, novoFechada);
+    state.semanasFechadasCelularMap[semanaIso] = novoFechada;
+    render();
+  }); });
 
   const btnParamCelular = document.getElementById("btn-salvar-param-celular");
   if (btnParamCelular) btnParamCelular.addEventListener("click", async function(){
