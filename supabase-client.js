@@ -217,10 +217,10 @@ const DB = {
 };
 
 function rowCelularDiarioToApp(r){
-  return { id: r.id, data: r.data, horasConsumo: Number(r.horas_consumo), horasMaps: Number(r.horas_maps) };
+  return { id: r.id, data: r.data, horasConsumo: Number(r.horas_consumo), horasMaps: Number(r.horas_maps), notas: r.notas };
 }
 function appCelularDiarioToRow(c){
-  return { id: (c.id && c.id.length===36)?c.id:undefined, data: c.data, horas_consumo: c.horasConsumo, horas_maps: c.horasMaps||0 };
+  return { id: (c.id && c.id.length===36)?c.id:undefined, data: c.data, horas_consumo: c.horasConsumo, horas_maps: c.horasMaps||0, notas: c.notas||null };
 }
 
 Object.assign(DB, {

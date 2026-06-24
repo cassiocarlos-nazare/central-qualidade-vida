@@ -1011,13 +1011,17 @@ function renderDashboardCelularAno(){
 
 function renderRegistroCelularForm(){
   const dataStr = new Date().toISOString().slice(0,10);
+  const mostrarMsg = state.celularRegistroSalvoMsg;
+  state.celularRegistroSalvoMsg = false;
   return '<div class="form-grid">'+
     field("Data", '<input type="date" id="fc-data" value="'+dataStr+'" />') +
     field("Tempo de consumo do celular (horas)", '<input type="text" id="fc-horas" placeholder="ex: 3:30" value="2:00" />') +
     field("Tempo de Google Maps (horas)", '<input type="text" id="fc-maps" placeholder="ex: 0:40" value="0:00" />') +
     '<div class="field"><label class="field-label">Tempo líquido de uso do celular</label><div id="fc-liquido-out" style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);padding:10px 0;">—</div></div>'+
+    '<div id="fc-meta-indicator"></div>'+
+    field("Observação", '<textarea id="fc-notas" rows="2"></textarea>') +
     '<button class="btn btn-primary" id="btn-salvar-celular">'+icon("check")+' Salvar registro diário</button>'+
-    '<div class="toast" id="msg-salvo-celular" style="display:none;">'+icon("check")+' Registro salvo</div></div>';
+    '<div class="toast" id="msg-salvo-celular" style="display:'+(mostrarMsg?"flex":"none")+';">'+icon("check")+' Registro salvo</div></div>';
 }
 
 function renderFiltroCelular(){
@@ -1156,16 +1160,38 @@ function renderHistoricoCelular(){
       '</div>';
 
     const detalhes = aberta ? [...itens].sort(function(a,b){ return b.data.localeCompare(a.data); }).map(function(r){
+      if (state.celularEditando === r.id) return renderEdicaoInlineCelular(r);
       const dataFmt = new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",weekday:"short"});
       const liquido = celularHorasNet(r);
-      return '<div class="list-row" style="margin-left:20px;background:transparent;border-style:dashed;"><div class="list-row-main">'+
+      const meta = state.parametros.metaCelularHoras;
+      const diff = liquido - meta;
+      const tagMeta = Math.abs(diff) < 0.0167 ? '<span class="badge badge-neutral" style="font-size:11px;">na meta</span>' :
+        diff > 0 ? '<span class="badge" style="font-size:11px;background:#F2685B22;color:#F2685B;">+'+fmtHoras(diff)+' acima</span>' :
+        '<span class="badge" style="font-size:11px;background:#4ED9A022;color:#4ED9A0;">'+fmtHoras(Math.abs(diff))+' abaixo</span>';
+      return '<div class="list-row" style="margin-left:20px;background:transparent;border-style:dashed;flex-wrap:wrap;"><div class="list-row-main">'+
         '<div class="list-row-title" style="font-size:12.5px;font-weight:400;color:var(--text-dim);">'+dataFmt+'</div>'+
-        '<div class="list-row-sub">consumo '+fmtHoras(r.horasConsumo)+' · maps '+fmtHoras(r.horasMaps)+' · líquido '+fmtHoras(liquido)+'</div></div>'+
+        '<div class="list-row-sub">consumo '+fmtHoras(r.horasConsumo)+' · maps '+fmtHoras(r.horasMaps)+' · líquido '+fmtHoras(liquido)+(r.notas?' · "'+r.notas+'"':'')+'</div></div>'+
+        tagMeta+
+        '<button class="icon-btn" data-editcelular="'+r.id+'" aria-label="Editar registro" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4h2M4 14.5V20h5.5L20 9.5 14.5 4 4 14.5z"/></svg></button>'+
         '<button class="icon-btn" data-delcelular="'+r.id+'" aria-label="Excluir registro">'+icon("trash")+'</button></div>';
     }).join("") : "";
 
     return header + detalhes;
   }).join("");
+}
+
+function renderEdicaoInlineCelular(r){
+  const liquidoAtual = celularHorasNet(r);
+  return '<div class="list-row" style="margin-left:20px;flex-direction:column;align-items:stretch;gap:10px;background:var(--surface-raised);">'+
+    '<div class="form-row">'+
+      field("Consumo (horas)", '<input type="text" id="edit-celular-horas" value="'+decimalParaHora(r.horasConsumo)+'" />') +
+      field("Google Maps (horas)", '<input type="text" id="edit-celular-maps" value="'+decimalParaHora(r.horasMaps)+'" />') +
+    '</div>'+
+    field("Observação", '<textarea id="edit-celular-notas" rows="2">'+(r.notas||"")+'</textarea>') +
+    '<div style="display:flex;gap:8px;">'+
+      '<button class="btn btn-primary" data-salvaredicaocelular="'+r.id+'" style="padding:8px 16px;font-size:12.5px;">'+icon("check")+' Salvar</button>'+
+      '<button class="btn btn-ghost" data-cancelaredicaocelular="1" style="padding:8px 16px;font-size:12.5px;">Cancelar</button>'+
+    '</div></div>';
 }
 
 function renderCelular(){
@@ -1661,7 +1687,11 @@ function render(){
   else if (state.view === "celular") {
     content.innerHTML = renderCelular();
     if (state.celularTab==="analise") setTimeout(drawCategoriaCelularChart,0);
-    if (state.celularTab==="registro") setTimeout(attachRegistroCelularLiveCalc,0);
+    if (state.celularTab==="registro") {
+      setTimeout(attachRegistroCelularLiveCalc,0);
+      const msgEl = document.getElementById("msg-salvo-celular");
+      if (msgEl && msgEl.style.display==="flex") setTimeout(function(){ if(msgEl) msgEl.style.display="none"; },2500);
+    }
   }
   else if (state.view === "leituras") { content.innerHTML = renderLeituras(); if (state.leiturasTab==="analise") setTimeout(drawLivrosChart,0); }
   else if (state.view === "analises") { content.innerHTML = renderAnalisesGerais(); setTimeout(drawCruzadoChart,0); }
@@ -1706,10 +1736,19 @@ function attachRegistroCelularLiveCalc(){
     const total = parseHM(horasEl.value);
     const maps = parseHM(mapsEl.value);
     const out = document.getElementById("fc-liquido-out");
+    const indicator = document.getElementById("fc-meta-indicator");
     if (total!==null) {
       const liquido = Math.max(0, total - (maps||0));
       out.textContent = fmtHoras(liquido);
-    } else { out.textContent = "—"; }
+      const meta = state.parametros.metaCelularHoras;
+      const diff = liquido - meta;
+      const acima = diff > 0.0167; // tolerância de 1 minuto
+      const abaixo = diff < -0.0167;
+      let cor = "var(--text-dim)", texto = "Igual à meta de "+fmtHoras(meta);
+      if (acima) { cor = "#F2685B"; texto = fmtHoras(Math.abs(diff))+" acima da meta de "+fmtHoras(meta); }
+      else if (abaixo) { cor = "#4ED9A0"; texto = fmtHoras(Math.abs(diff))+" abaixo da meta de "+fmtHoras(meta); }
+      indicator.innerHTML = '<div class="insight-row" style="border-left:3px solid '+cor+';"><span style="color:'+cor+';font-weight:500;">'+texto+'</span></div>';
+    } else { out.textContent = "—"; indicator.innerHTML = ""; }
   }
   [horasEl, mapsEl].forEach(function(el){ el.addEventListener("input", recalc); });
   recalc();
@@ -1969,25 +2008,52 @@ function attachHandlers(){
     const dataStr = document.getElementById("fc-data").value;
     const horasConsumo = parseHM(document.getElementById("fc-horas").value);
     const horasMaps = parseHM(document.getElementById("fc-maps").value) || 0;
+    const notas = document.getElementById("fc-notas").value;
     if (horasConsumo===null) return;
     btnSalvarCelular.disabled = true;
     const existente = state.celularDiario.find(function(r){ return r.data===dataStr; });
-    const reg = { data: dataStr, horasConsumo: horasConsumo, horasMaps: horasMaps };
+    const reg = { data: dataStr, horasConsumo: horasConsumo, horasMaps: horasMaps, notas: notas };
     if (existente) reg.id = existente.id;
     const salvo = await DB.upsertCelularDiario(reg);
     if (salvo) {
       state.celularDiario = state.celularDiario.filter(function(r){ return r.data!==dataStr; });
       state.celularDiario.push(salvo);
     }
-    btnSalvarCelular.disabled = false;
-    const msg = document.getElementById("msg-salvo-celular");
-    if (msg) { msg.style.display="flex"; setTimeout(()=>{ if(msg) msg.style.display="none"; },2500); }
+    state.celularRegistroSalvoMsg = true;
+    render();
   });
 
   document.querySelectorAll("[data-delcelular]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const motivo = prompt("Por que deseja excluir este registro?");
+    if (motivo === null) return; // cancelou
     const id = btn.getAttribute("data-delcelular");
     await DB.deleteCelularDiario(id);
     state.celularDiario = state.celularDiario.filter(function(r){ return r.id!==id; });
+    render();
+  }); });
+
+  document.querySelectorAll("[data-editcelular]").forEach(function(btn){ btn.addEventListener("click", function(){
+    state.celularEditando = btn.getAttribute("data-editcelular");
+    render();
+  }); });
+  document.querySelectorAll("[data-cancelaredicaocelular]").forEach(function(btn){ btn.addEventListener("click", function(){
+    state.celularEditando = null;
+    render();
+  }); });
+  document.querySelectorAll("[data-salvaredicaocelular]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-salvaredicaocelular");
+    const reg = state.celularDiario.find(function(r){ return r.id===id; });
+    if (!reg) return;
+    const horasConsumo = horaParaDecimal(document.getElementById("edit-celular-horas").value);
+    const horasMaps = horaParaDecimal(document.getElementById("edit-celular-maps").value) || 0;
+    const notas = document.getElementById("edit-celular-notas").value;
+    if (horasConsumo===null) return;
+    const atualizado = { id: id, data: reg.data, horasConsumo: horasConsumo, horasMaps: horasMaps, notas: notas };
+    const salvo = await DB.upsertCelularDiario(atualizado);
+    if (salvo) {
+      state.celularDiario = state.celularDiario.map(function(r){ return r.id===id ? salvo : r; });
+    }
+    state.celularEditando = null;
     render();
   }); });
 
