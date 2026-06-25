@@ -25,8 +25,8 @@ const MODULES = [
   { id: "sono", label: "Sono", icon: "moon", active: true, section: "modules" },
   { id: "celular", label: "Uso do celular", icon: "phone", active: true, section: "modules" },
   { id: "leituras", label: "Leituras", icon: "book", active: true, section: "modules" },
-  { id: "habitos", label: "Hábitos diários", icon: "checklist", active: false, section: "modules" },
-  { id: "momentos", label: "Momentos diários", icon: "photo", active: false, section: "modules" },
+  { id: "habitos", label: "Hábitos diários", icon: "checklist", active: true, section: "modules" },
+  { id: "momentos", label: "Momentos diários", icon: "photo", active: true, section: "modules" },
   { id: "proposito", label: "Propósito de vida", icon: "compass", active: false, section: "modules" },
   { id: "exercicios", label: "Exercícios físicos", icon: "run", active: true, section: "modules" },
   { id: "anotacoes", label: "Anotações", icon: "notebook", active: false, section: "modules" },
@@ -44,6 +44,16 @@ let state = {
   movimentacao: [],
   celularDiario: [],
   semanasFechadasCelularMap: {},
+  habitos: [],
+  registrosHabitos: [],
+  anotacoesDia: [],
+  pessoas: [],
+  tagsMomentos: [],
+  jornadas: [],
+  momentos: [],
+  momentoPessoas: [],
+  momentoTags: [],
+  momentoJornadas: [],
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -163,8 +173,58 @@ async function loadData(){
       state.parametros = Object.assign({}, state.parametros, parametrosSalvos.gerais);
     }
 
-    const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap] = await Promise.all([
-      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas()
+    const habitosJaCarregados = parametrosSalvos && parametrosSalvos.carga_habitos_feita;
+    if (!habitosJaCarregados) {
+      const contagem = await DB.contarHabitos();
+      if (contagem === 0) {
+        const habitosInicial = HABITOS_IMPORT.map(function(h, i){
+          return { nome: h.nome, icone: h.icone, negativo: h.negativo, ordem: i, ativo: true, tipoRecorrencia: "diario" };
+        });
+        const ok = await DB.bulkInsertHabitos(habitosInicial);
+        if (ok) await DB.setParametro("carga_habitos_feita", true);
+      } else {
+        await DB.setParametro("carga_habitos_feita", true);
+      }
+    }
+
+    const pessoasJaCarregadas = parametrosSalvos && parametrosSalvos.carga_pessoas_feita;
+    if (!pessoasJaCarregadas) {
+      const contagem = await DB.contarPessoas();
+      if (contagem === 0) {
+        const ok = await DB.bulkInsertPessoas(PESSOAS_IMPORT);
+        if (ok) await DB.setParametro("carga_pessoas_feita", true);
+      } else {
+        await DB.setParametro("carga_pessoas_feita", true);
+      }
+    }
+
+    const tagsJaCarregadas = parametrosSalvos && parametrosSalvos.carga_tags_momentos_feita;
+    if (!tagsJaCarregadas) {
+      const contagem = await DB.contarTagsMomentos();
+      if (contagem === 0) {
+        const ok = await DB.bulkInsertTagsMomentos(TAGS_MOMENTOS_IMPORT);
+        if (ok) await DB.setParametro("carga_tags_momentos_feita", true);
+      } else {
+        await DB.setParametro("carga_tags_momentos_feita", true);
+      }
+    }
+
+    const jornadasJaCarregadas = parametrosSalvos && parametrosSalvos.carga_jornadas_feita;
+    if (!jornadasJaCarregadas) {
+      const contagem = await DB.contarJornadas();
+      if (contagem === 0) {
+        const jornadasInicial = JORNADAS_IMPORT.map(function(j){ return { nome: j.nome, descricao: j.descricao }; });
+        const ok = await DB.bulkInsertJornadas(jornadasInicial);
+        if (ok) await DB.setParametro("carga_jornadas_feita", true);
+      } else {
+        await DB.setParametro("carga_jornadas_feita", true);
+      }
+    }
+
+    const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap,
+      habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas] = await Promise.all([
+      DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas(),
+      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getJornadas(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoJornadas()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -175,6 +235,16 @@ async function loadData(){
     state.movimentacao = movimentacao;
     state.celularDiario = celularDiario;
     state.semanasFechadasCelularMap = semanasFechadasCelularMap;
+    state.habitos = habitos;
+    state.registrosHabitos = registrosHabitos;
+    state.anotacoesDia = anotacoesDia;
+    state.pessoas = pessoas;
+    state.tagsMomentos = tagsMomentos;
+    state.jornadas = jornadas;
+    state.momentos = momentos;
+    state.momentoPessoas = momentoPessoas;
+    state.momentoTags = momentoTags;
+    state.momentoJornadas = momentoJornadas;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -1654,6 +1724,304 @@ function renderExercicios(){
     ) + '</div>';
 }
 
+// ---------- Módulo: Hábitos diários ----------
+
+function habitoAplicavelNoDia(habito, dataIso){
+  const d = new Date(dataIso+"T00:00:00");
+  const diaSemana = d.getDay(); // 0=domingo
+  const diaMes = d.getDate();
+  if (habito.tipoRecorrencia === "diario") return true;
+  if (habito.tipoRecorrencia === "semanal") return (habito.diasSemana||[]).indexOf(diaSemana) >= 0;
+  if (habito.tipoRecorrencia === "mensal") return (habito.diasMes||[]).indexOf(diaMes) >= 0;
+  return true;
+}
+
+function habitosAplicaveisNoDia(dataIso, incluirInativos){
+  return state.habitos.filter(function(h){
+    if (!incluirInativos && !h.ativo) return false;
+    return habitoAplicavelNoDia(h, dataIso);
+  });
+}
+
+function registroHabitoNoDia(habitoId, dataIso){
+  return state.registrosHabitos.find(function(r){ return r.habitoId===habitoId && r.data===dataIso; }) || null;
+}
+
+function scoreDisciplinaDia(dataIso){
+  // Para o cálculo no dashboard de dias passados, considera os hábitos que tinham
+  // QUALQUER registro nesse dia (cumprido ou não) — preserva histórico mesmo se o
+  // hábito for inativado depois.
+  const idsComRegistro = state.registrosHabitos.filter(function(r){ return r.data===dataIso; }).map(function(r){ return r.habitoId; });
+  const aplicaveisHoje = habitosAplicaveisNoDia(dataIso, false).map(function(h){ return h.id; });
+  const idsRelevantes = Array.from(new Set([...idsComRegistro, ...aplicaveisHoje]));
+  if (!idsRelevantes.length) return null;
+  const cumpridos = idsRelevantes.filter(function(id){
+    const r = registroHabitoNoDia(id, dataIso);
+    return r && r.cumprido;
+  }).length;
+  return Math.round((cumpridos/idsRelevantes.length)*100);
+}
+
+function calcularSequenciaAtual(){
+  let seq = 0;
+  let cur = new Date();
+  while (true) {
+    const iso = isoDate(cur);
+    const aplicaveis = habitosAplicaveisNoDia(iso, false);
+    if (aplicaveis.length === 0) { cur.setDate(cur.getDate()-1); continue; }
+    const score = scoreDisciplinaDia(iso);
+    if (score === null || score < 100) break;
+    seq++;
+    cur.setDate(cur.getDate()-1);
+    if (seq > 730) break;
+  }
+  return seq;
+}
+
+function renderDashboardHabitos(){
+  const hoje = isoDate(new Date());
+  const scoreHoje = scoreDisciplinaDia(hoje);
+  const sequencia = calcularSequenciaAtual();
+
+  const { start, end } = getPeriodoAtual("habitosView");
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const dias = [];
+  let cur = new Date(start);
+  while (isoDate(cur) <= endIso) { dias.push(isoDate(cur)); cur.setDate(cur.getDate()+1); }
+  const scoresPeriodo = dias.map(scoreDisciplinaDia).filter(function(s){ return s!==null; });
+  const mediaPeriodo = scoresPeriodo.length ? Math.round(avg(scoresPeriodo)) : null;
+
+  // Consistência por hábito ativo no período
+  const habitosAtivos = state.habitos.filter(function(h){ return h.ativo; }).sort(function(a,b){ return a.ordem-b.ordem; });
+  const consistencia = habitosAtivos.map(function(h){
+    const diasAplicaveis = dias.filter(function(d){ return habitoAplicavelNoDia(h, d); });
+    const diasCumpridos = diasAplicaveis.filter(function(d){ const r = registroHabitoNoDia(h.id, d); return r && r.cumprido; });
+    const pct = diasAplicaveis.length ? Math.round((diasCumpridos.length/diasAplicaveis.length)*100) : null;
+    return { habito: h, pct: pct, total: diasAplicaveis.length, cumpridos: diasCumpridos.length };
+  });
+  const emDia = consistencia.filter(function(c){ return c.pct!==null && c.pct>=80; });
+  const maisFraco = consistencia.filter(function(c){ return c.pct!==null; }).sort(function(a,b){ return a.pct-b.pct; })[0];
+
+  return renderPeriodSelector("habitosView") +
+    '<div class="grid grid-4" style="margin-bottom:24px;">'+
+      metricCard("Disciplina hoje", scoreHoje!==null?scoreHoje+"%":"—", "checklist", null, scoreHoje!==null?corDisciplina(scoreHoje):null) +
+      metricCard("Média do período", mediaPeriodo!==null?mediaPeriodo+"%":"—") +
+      metricCard("Sequência atual", sequencia+" dia"+(sequencia!==1?"s":"")) +
+      metricCard("Hábitos em dia (≥80%)", emDia.length+" de "+consistencia.length) +
+    '</div>'+
+    (maisFraco ? '<div class="insight-row" style="margin-bottom:20px;">'+icon("bulb")+'<span>O hábito que mais precisa de atenção no período é <strong>'+maisFraco.habito.nome+'</strong>, cumprido em '+maisFraco.pct+'% dos dias aplicáveis.</span></div>' : '')+
+    '<div class="section-title" style="margin-top:0;">Consistência por hábito</div>'+
+    consistencia.map(function(c){
+      const cor = c.pct!==null ? corDisciplina(c.pct) : "var(--text-faint)";
+      return '<div class="list-row"><div class="list-row-main">'+
+        '<div class="list-row-title">'+c.habito.nome+(c.habito.negativo?' <span style="font-size:10.5px;color:var(--text-faint);">(evitar)</span>':'')+'</div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+c.cumpridos+' de '+c.total+' dias aplicáveis</div></div>'+
+        '<div style="width:90px;"><div style="background:var(--surface-raised);border-radius:6px;height:8px;overflow:hidden;"><div style="background:'+cor+';height:100%;width:'+(c.pct||0)+'%;"></div></div></div>'+
+        '<div style="font-family:var(--font-mono);font-size:13px;width:40px;text-align:right;color:'+cor+';">'+(c.pct!==null?c.pct+"%":"—")+'</div>'+
+        '</div>';
+    }).join("");
+}
+
+function corDisciplina(pct){
+  if (pct>=85) return "#4ED9A0";
+  if (pct>=70) return "#4D8FFF";
+  if (pct>=50) return "#F2D94B";
+  if (pct>=30) return "#F2A23C";
+  return "#F2685B";
+}
+
+function renderChecklistHabitos(){
+  const dataAtual = state.habitosChecklistData || isoDate(new Date());
+  const habitosHoje = habitosAplicaveisNoDia(dataAtual, false).sort(function(a,b){ return a.ordem-b.ordem; });
+  const anotacao = state.anotacoesDia.find(function(a){ return a.data===dataAtual; });
+  const dataFmt = new Date(dataAtual+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+
+  return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap;">'+
+      '<input type="date" id="habito-data-picker" value="'+dataAtual+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;color:var(--text);" />'+
+      '<span style="font-size:13px;color:var(--text-dim);text-transform:capitalize;">'+dataFmt+'</span>'+
+    '</div>'+
+    (habitosHoje.length===0 ? '<div class="empty-state">Nenhum hábito aplicável para este dia, de acordo com as regras de recorrência configuradas.</div>' :
+    '<div class="card" style="margin-bottom:20px;">'+
+      habitosHoje.map(function(h){
+        const r = registroHabitoNoDia(h.id, dataAtual);
+        const cumprido = r ? r.cumprido : false;
+        return '<div style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);">'+
+          '<button class="habito-toggle-btn" data-habito="'+h.id+'" data-data="'+dataAtual+'" style="width:28px;height:28px;border-radius:50%;border:2px solid '+(cumprido?"var(--purple)":"var(--border-strong)")+';background:'+(cumprido?"var(--purple)":"transparent")+';display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+
+            (cumprido?icon("check"):'')+
+          '</button>'+
+          '<span style="font-size:14px;flex:1;">'+h.nome+(h.negativo?' <span style="font-size:11px;color:var(--text-faint);">(evitar)</span>':'')+'</span>'+
+        '</div>';
+      }).join("")+
+    '</div>')+
+    '<div class="field"><label class="field-label">Anotação do dia</label>'+
+      '<textarea id="habito-anotacao" rows="3" placeholder="Como foi o dia...">'+(anotacao?anotacao.texto:"")+'</textarea>'+
+    '</div>'+
+    '<button class="btn btn-ghost" id="btn-salvar-anotacao-dia" style="margin-top:10px;">'+icon("check")+' Salvar anotação</button>'+
+    '<div class="toast" id="msg-salvo-anotacao" style="display:none;margin-top:8px;">'+icon("check")+' Anotação salva</div>';
+}
+
+function renderHistoricoHabitos(){
+  const { start, end } = getPeriodoAtual("habitosView");
+  const dias = [];
+  let cur = new Date(start);
+  while (isoDate(cur) <= isoDate(end)) { dias.push(isoDate(cur)); cur.setDate(cur.getDate()+1); }
+  const diasOrdenados = [...dias].reverse();
+
+  return renderPeriodSelector("habitosView") +
+    diasOrdenados.map(function(d){
+      const score = scoreDisciplinaDia(d);
+      const dataFmt = new Date(d+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
+      const cor = score!==null ? corDisciplina(score) : "var(--text-faint)";
+      const aplicaveis = habitosAplicaveisNoDia(d, true).filter(function(h){
+        return registroHabitoNoDia(h.id, d) !== null || h.ativo;
+      });
+      const anotacao = state.anotacoesDia.find(function(a){ return a.data===d; });
+      return '<div class="list-row" style="align-items:flex-start;flex-wrap:wrap;"><div class="list-row-main">'+
+        '<div class="list-row-title">'+dataFmt+'</div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+(anotacao&&anotacao.texto?'"'+anotacao.texto+'"':(score!==null?aplicaveis.filter(function(h){var r=registroHabitoNoDia(h.id,d);return r&&r.cumprido;}).length+" de "+aplicaveis.length+" hábitos cumpridos":"sem registros"))+'</div></div>'+
+        '<div class="badge" style="background:'+cor+'22;color:'+cor+';">'+(score!==null?score+"%":"—")+'</div>'+
+      '</div>';
+    }).join("");
+}
+
+function renderGerenciarHabitos(){
+  const habitosOrdenados = [...state.habitos].sort(function(a,b){ return a.ordem-b.ordem; });
+  return '<button class="btn btn-primary" id="btn-novo-habito" style="margin-bottom:18px;">'+icon("check")+' Novo hábito</button>'+
+    habitosOrdenados.map(function(h){
+      const recorrenciaTxt = h.tipoRecorrencia==="diario" ? "Todos os dias" :
+        h.tipoRecorrencia==="semanal" ? "Dias da semana: "+(h.diasSemana||[]).map(function(d){ return ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][d]; }).join(", ") :
+        "Dias do mês: "+(h.diasMes||[]).join(", ");
+      return '<div class="list-row"><div class="list-row-main">'+
+        '<div class="list-row-title">'+h.nome+(h.negativo?' <span style="font-size:10.5px;color:var(--text-faint);">(evitar)</span>':'')+(!h.ativo?' <span class="module-tile-tag">inativo</span>':'')+'</div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+recorrenciaTxt+'</div></div>'+
+        '<button class="icon-btn" data-editarhabito="'+h.id+'" aria-label="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4h2M4 14.5V20h5.5L20 9.5 14.5 4 4 14.5z"/></svg></button>'+
+        '<button class="icon-btn" data-toggleativohabito="'+h.id+'" aria-label="'+(h.ativo?"Inativar":"Ativar")+'">'+(h.ativo?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg>')+'</button>'+
+        '</div>';
+    }).join("") +
+    (state.habitoFormAberto ? renderFormHabito() : "");
+}
+
+function renderFormHabito(){
+  const h = state.habitoEditando ? state.habitos.find(function(x){ return x.id===state.habitoEditando; }) : null;
+  const tipo = h ? h.tipoRecorrencia : "diario";
+  const diasSemanaSel = h ? (h.diasSemana||[]) : [];
+  const diasMesSel = h ? (h.diasMes||[]) : [];
+  const diasSemanaLabels = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+
+  return '<div class="card" style="margin-top:16px;">'+
+    '<p style="font-size:14px;font-weight:500;margin:0 0 14px;">'+(h?"Editar hábito":"Novo hábito")+'</p>'+
+    '<div class="form-grid">'+
+    field("Nome do hábito", '<input type="text" id="hf-nome" value="'+(h?h.nome:"")+'" placeholder="ex: Meditação" />') +
+    '<label class="checkbox-field"><input type="checkbox" id="hf-negativo" '+(h&&h.negativo?"checked":"")+' /> Hábito negativo (marcar como cumprido quando EVITAR o comportamento)</label>'+
+    field("Recorrência", '<select id="hf-tipo">'+
+      '<option value="diario" '+(tipo==="diario"?"selected":"")+'>Todos os dias</option>'+
+      '<option value="semanal" '+(tipo==="semanal"?"selected":"")+'>Dias específicos da semana</option>'+
+      '<option value="mensal" '+(tipo==="mensal"?"selected":"")+'>Dias específicos do mês</option>'+
+      '</select>') +
+    '<div id="hf-dias-semana" style="display:'+(tipo==="semanal"?"flex":"none")+';gap:6px;flex-wrap:wrap;">'+
+      diasSemanaLabels.map(function(lbl, i){ return '<button type="button" class="hf-dia-semana-btn tab-btn '+(diasSemanaSel.indexOf(i)>=0?"is-active":"")+'" data-dia="'+i+'" style="padding:6px 10px;">'+lbl+'</button>'; }).join("")+
+    '</div>'+
+    '<div id="hf-dias-mes" style="display:'+(tipo==="mensal"?"block":"none")+';">'+
+      '<input type="text" id="hf-dias-mes-input" value="'+diasMesSel.join(", ")+'" placeholder="ex: 1, 15, 30" />'+
+      '<p style="font-size:11.5px;color:var(--text-faint);margin-top:4px;">Dias do mês separados por vírgula</p>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;">'+
+      '<button class="btn btn-primary" id="btn-salvar-habito" '+(h?'data-id="'+h.id+'"':'')+'>'+icon("check")+' Salvar</button>'+
+      '<button class="btn btn-ghost" id="btn-cancelar-habito">Cancelar</button>'+
+    '</div></div></div>';
+}
+
+function renderHabitos(){
+  if (!state.habitosView) state.habitosView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null };
+  if (!state.habitosTab) state.habitosTab = "dashboard";
+  const tabs = [{id:"dashboard",label:"Dashboard"},{id:"checklist",label:"Checklist do dia"},{id:"historico",label:"Histórico"},{id:"gerenciar",label:"Gerenciar hábitos"}];
+  return backLink() +
+    '<div class="page-header"><div class="page-title">Hábitos diários</div></div>'+
+    tabsHtml(tabs, state.habitosTab, "habitostab") +
+    '<div id="habitos-content">' + (
+      state.habitosTab==="dashboard" ? renderDashboardHabitos() :
+      state.habitosTab==="checklist" ? renderChecklistHabitos() :
+      state.habitosTab==="historico" ? renderHistoricoHabitos() : renderGerenciarHabitos()
+    ) + '</div>';
+}
+
+// ---------- Módulo: Registro de Momentos (cadastro) ----------
+
+function multiSelectChip(id, label, selecionado){
+  return '<button type="button" class="momento-chip" data-chipgroup="'+id.split(":")[0]+'" data-chipid="'+id.split(":")[1]+'" style="padding:6px 12px;font-size:12px;border-radius:var(--radius-sm);border:1px solid '+(selecionado?"var(--purple)":"var(--border)")+';background:'+(selecionado?"var(--purple-dim)":"var(--surface-raised)")+';color:'+(selecionado?"var(--text)":"var(--text-dim)")+';">'+label+'</button>';
+}
+
+function renderCadastroMomento(){
+  const m = state.momentoEditando;
+  const today = new Date().toISOString().slice(0,10);
+  const pessoasSelecionadas = m ? state.momentoPessoas.filter(function(mp){ return mp.momento_id===m.id; }).map(function(mp){ return mp.pessoa_id; }) : (state.momentoFormPessoasSel||[]);
+  const tagsSelecionadas = m ? state.momentoTags.filter(function(mt){ return mt.momento_id===m.id; }).map(function(mt){ return mt.tag_id; }) : (state.momentoFormTagsSel||[]);
+  const jornadasSelecionadas = m ? state.momentoJornadas.filter(function(mj){ return mj.momento_id===m.id; }).map(function(mj){ return mj.jornada_id; }) : (state.momentoFormJornadasSel||[]);
+
+  const pessoasOrdenadas = [...state.pessoas].filter(function(p){ return p.ativo; }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+  const tagsOrdenadas = [...state.tagsMomentos].filter(function(t){ return t.ativo; }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+  const jornadasOrdenadas = [...state.jornadas].filter(function(j){ return j.ativo; });
+
+  return '<div class="form-grid" style="max-width:560px;">'+
+    field("Título do momento", '<input type="text" id="mf-titulo" value="'+(m?m.titulo:"")+'" placeholder="ex: Sábado de churrasco" />') +
+    field("Data", '<input type="date" id="mf-data" value="'+(m?m.data:today)+'" />') +
+    field("Foto (opcional)", '<input type="file" id="mf-foto" accept="image/*" />'+(m&&m.fotoUrl?'<div style="margin-top:8px;"><img src="'+m.fotoUrl+'" style="max-width:160px;border-radius:var(--radius-sm);" /></div>':'')) +
+    field("Anotação", '<textarea id="mf-anotacao" rows="3" placeholder="Conte como foi...">'+(m&&m.anotacao?m.anotacao:"")+'</textarea>') +
+
+    '<div class="field"><label class="field-label">Pessoas envolvidas</label>'+
+      '<div id="mf-pessoas-chips" style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;padding:4px 0;">'+
+        pessoasOrdenadas.map(function(p){ return multiSelectChip("pessoa:"+p.id, p.nome, pessoasSelecionadas.indexOf(p.id)>=0); }).join("")+
+      '</div></div>'+
+
+    '<div class="field"><label class="field-label">Tags</label>'+
+      '<div id="mf-tags-chips" style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;padding:4px 0;">'+
+        tagsOrdenadas.map(function(t){ return multiSelectChip("tag:"+t.id, t.nome, tagsSelecionadas.indexOf(t.id)>=0); }).join("")+
+      '</div></div>'+
+
+    '<div class="field"><label class="field-label">Jornadas</label>'+
+      '<div id="mf-jornadas-chips" style="display:flex;flex-wrap:wrap;gap:6px;">'+
+        jornadasOrdenadas.map(function(j){ return multiSelectChip("jornada:"+j.id, j.nome, jornadasSelecionadas.indexOf(j.id)>=0); }).join("")+
+      '</div></div>'+
+
+    '<button class="btn btn-primary" id="btn-salvar-momento" '+(m?'data-id="'+m.id+'"':'')+'>'+icon("check")+' Salvar momento</button>'+
+    '<div class="toast" id="msg-salvo-momento" style="display:none;">'+icon("check")+' Momento salvo</div>'+
+  '</div>';
+}
+
+function renderListaMomentos(){
+  const lista = [...state.momentos].sort(function(a,b){ return b.data.localeCompare(a.data); });
+  if (!lista.length) return '<div class="empty-state">Nenhum momento registrado ainda.</div>';
+  return lista.map(function(m){
+    const dataFmt = new Date(m.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
+    const tags = state.momentoTags.filter(function(mt){ return mt.momento_id===m.id; }).map(function(mt){
+      const t = state.tagsMomentos.find(function(x){ return x.id===mt.tag_id; }); return t?t.nome:null;
+    }).filter(Boolean);
+    const pessoas = state.momentoPessoas.filter(function(mp){ return mp.momento_id===m.id; }).map(function(mp){
+      const p = state.pessoas.find(function(x){ return x.id===mp.pessoa_id; }); return p?p.nome:null;
+    }).filter(Boolean);
+    return '<div class="list-row" style="align-items:flex-start;">'+
+      (m.fotoUrl ? '<img src="'+m.fotoUrl+'" style="width:48px;height:48px;border-radius:var(--radius-sm);object-fit:cover;flex-shrink:0;margin-right:4px;" />' : '<div class="module-tile-icon" style="width:48px;height:48px;flex-shrink:0;">'+icon("photo")+'</div>')+
+      '<div class="list-row-main" style="margin-left:10px;">'+
+        '<div class="list-row-title">'+m.titulo+'</div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+dataFmt+(tags.length?" · "+tags.join(", "):"")+(pessoas.length?" · "+pessoas.join(", "):"")+'</div>'+
+      '</div>'+
+      '<button class="icon-btn" data-editarmomento="'+m.id+'" aria-label="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4h2M4 14.5V20h5.5L20 9.5 14.5 4 4 14.5z"/></svg></button>'+
+      '<button class="icon-btn" data-delmomento="'+m.id+'" aria-label="Excluir">'+icon("trash")+'</button>'+
+      '</div>';
+  }).join("");
+}
+
+function renderMomentos(){
+  if (!state.momentosTab) state.momentosTab = "registro";
+  const tabs = [{id:"registro",label:"Registrar"},{id:"lista",label:"Meus momentos"}];
+  return backLink() +
+    '<div class="page-header"><div class="page-title">Momentos diários</div><div class="page-sub">Um diário para registrar os momentos do seu dia a dia.</div></div>'+
+    tabsHtml(tabs, state.momentosTab, "momentostab") +
+    '<div id="momentos-content">' + (
+      state.momentosTab==="registro" ? renderCadastroMomento() : renderListaMomentos()
+    ) + '</div>';
+}
+
 function renderAnalisesGerais(){
   const { insights, corrSonoCelular, corrScoreCelular, cruz } = gerarInsightsCruzados();
   const cruzValido = cruz.filter(c=>c.sono!==null);
@@ -1701,6 +2069,8 @@ function render(){
     if (state.exerciciosSecao==="peso" && state.pesoTab==="analise") setTimeout(drawPesoEvolucaoChart,0);
     if (state.exerciciosSecao==="atividade" && state.exercicioTab==="analise") setTimeout(drawExerciciosTipoChart,0);
   }
+  else if (state.view === "habitos") { content.innerHTML = renderHabitos(); }
+  else if (state.view === "momentos") { content.innerHTML = renderMomentos(); }
   attachHandlers();
 }
 
@@ -2190,6 +2560,164 @@ function attachHandlers(){
     state.bioimpedancia = state.bioimpedancia.filter(b=>b.id!==id);
     render();
   }); });
+
+  // ---------- Hábitos ----------
+  document.querySelectorAll("[data-habitostab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.habitosTab = btn.getAttribute("data-habitostab"); state.habitoFormAberto = false; render(); }); });
+
+  const habitoDataPicker = document.getElementById("habito-data-picker");
+  if (habitoDataPicker) habitoDataPicker.addEventListener("change", function(){ state.habitosChecklistData = habitoDataPicker.value; render(); });
+
+  document.querySelectorAll(".habito-toggle-btn").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const habitoId = btn.getAttribute("data-habito");
+    const data = btn.getAttribute("data-data");
+    const existente = registroHabitoNoDia(habitoId, data);
+    const novoCumprido = !(existente && existente.cumprido);
+    const reg = { habitoId: habitoId, data: data, cumprido: novoCumprido };
+    if (existente) reg.id = existente.id;
+    const salvo = await DB.upsertRegistroHabito(reg);
+    if (salvo) {
+      state.registrosHabitos = state.registrosHabitos.filter(function(r){ return !(r.habitoId===habitoId && r.data===data); });
+      state.registrosHabitos.push(salvo);
+    }
+    render();
+  }); });
+
+  const btnSalvarAnotacao = document.getElementById("btn-salvar-anotacao-dia");
+  if (btnSalvarAnotacao) btnSalvarAnotacao.addEventListener("click", async function(){
+    const data = state.habitosChecklistData || isoDate(new Date());
+    const texto = document.getElementById("habito-anotacao").value;
+    const salvo = await DB.upsertAnotacaoDia(data, texto);
+    if (salvo) {
+      state.anotacoesDia = state.anotacoesDia.filter(function(a){ return a.data!==data; });
+      state.anotacoesDia.push(salvo);
+    }
+    const msg = document.getElementById("msg-salvo-anotacao");
+    if (msg) { msg.style.display="flex"; setTimeout(function(){ if(msg) msg.style.display="none"; },2500); }
+  });
+
+  const btnNovoHabito = document.getElementById("btn-novo-habito");
+  if (btnNovoHabito) btnNovoHabito.addEventListener("click", function(){ state.habitoEditando = null; state.habitoFormAberto = true; render(); });
+  document.querySelectorAll("[data-editarhabito]").forEach(function(btn){ btn.addEventListener("click", function(){ state.habitoEditando = btn.getAttribute("data-editarhabito"); state.habitoFormAberto = true; render(); }); });
+  const btnCancelarHabito = document.getElementById("btn-cancelar-habito");
+  if (btnCancelarHabito) btnCancelarHabito.addEventListener("click", function(){ state.habitoFormAberto = false; render(); });
+
+  document.querySelectorAll("[data-toggleativohabito]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-toggleativohabito");
+    const h = state.habitos.find(function(x){ return x.id===id; });
+    if (!h) return;
+    const atualizado = Object.assign({}, h, { ativo: !h.ativo });
+    const salvo = await DB.upsertHabito(atualizado);
+    if (salvo) state.habitos = state.habitos.map(function(x){ return x.id===id ? salvo : x; });
+    render();
+  }); });
+
+  const hfTipo = document.getElementById("hf-tipo");
+  if (hfTipo) hfTipo.addEventListener("change", function(){
+    document.getElementById("hf-dias-semana").style.display = hfTipo.value==="semanal" ? "flex" : "none";
+    document.getElementById("hf-dias-mes").style.display = hfTipo.value==="mensal" ? "block" : "none";
+  });
+  document.querySelectorAll(".hf-dia-semana-btn").forEach(function(btn){ btn.addEventListener("click", function(){ btn.classList.toggle("is-active"); }); });
+
+  const btnSalvarHabito = document.getElementById("btn-salvar-habito");
+  if (btnSalvarHabito) btnSalvarHabito.addEventListener("click", async function(){
+    const id = btnSalvarHabito.getAttribute("data-id");
+    const nome = document.getElementById("hf-nome").value.trim();
+    if (!nome) return;
+    const tipo = document.getElementById("hf-tipo").value;
+    const negativo = document.getElementById("hf-negativo").checked;
+    let diasSemana = null, diasMes = null;
+    if (tipo==="semanal") {
+      diasSemana = Array.from(document.querySelectorAll(".hf-dia-semana-btn.is-active")).map(function(b){ return Number(b.getAttribute("data-dia")); });
+    } else if (tipo==="mensal") {
+      diasMes = document.getElementById("hf-dias-mes-input").value.split(",").map(function(s){ return Number(s.trim()); }).filter(function(n){ return !isNaN(n) && n>=1 && n<=31; });
+    }
+    const existente = id ? state.habitos.find(function(h){ return h.id===id; }) : null;
+    const habito = {
+      id: id||undefined, nome: nome, negativo: negativo, tipoRecorrencia: tipo, diasSemana: diasSemana, diasMes: diasMes,
+      icone: existente?existente.icone:"checklist", ordem: existente?existente.ordem:state.habitos.length, ativo: existente?existente.ativo:true
+    };
+    const salvo = await DB.upsertHabito(habito);
+    if (salvo) {
+      if (existente) state.habitos = state.habitos.map(function(h){ return h.id===id ? salvo : h; });
+      else state.habitos.push(salvo);
+    }
+    state.habitoFormAberto = false;
+    state.habitoEditando = null;
+    render();
+  });
+
+  // ---------- Momentos ----------
+  document.querySelectorAll("[data-momentostab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.momentosTab = btn.getAttribute("data-momentostab"); state.momentoEditando = null; render(); }); });
+
+  document.querySelectorAll(".momento-chip").forEach(function(btn){ btn.addEventListener("click", function(){
+    const grupo = btn.getAttribute("data-chipgroup");
+    const id = btn.getAttribute("data-chipid");
+    const key = grupo==="pessoa" ? "momentoFormPessoasSel" : grupo==="tag" ? "momentoFormTagsSel" : "momentoFormJornadasSel";
+    if (!state[key]) state[key] = [];
+    const idx = state[key].indexOf(id);
+    if (idx>=0) state[key].splice(idx,1); else state[key].push(id);
+    const selecionado = idx<0;
+    btn.style.borderColor = selecionado ? "var(--purple)" : "var(--border)";
+    btn.style.background = selecionado ? "var(--purple-dim)" : "var(--surface-raised)";
+    btn.style.color = selecionado ? "var(--text)" : "var(--text-dim)";
+  }); });
+
+  document.querySelectorAll("[data-editarmomento]").forEach(function(btn){ btn.addEventListener("click", function(){
+    const id = btn.getAttribute("data-editarmomento");
+    state.momentoEditando = state.momentos.find(function(m){ return m.id===id; });
+    state.momentosTab = "registro";
+    render();
+  }); });
+
+  document.querySelectorAll("[data-delmomento]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-delmomento");
+    await DB.deleteMomento(id);
+    state.momentos = state.momentos.filter(function(m){ return m.id!==id; });
+    render();
+  }); });
+
+  const btnSalvarMomento = document.getElementById("btn-salvar-momento");
+  if (btnSalvarMomento) btnSalvarMomento.addEventListener("click", async function(){
+    const idExistente = btnSalvarMomento.getAttribute("data-id");
+    const titulo = document.getElementById("mf-titulo").value.trim();
+    if (!titulo) return;
+    btnSalvarMomento.disabled = true;
+    const data = document.getElementById("mf-data").value;
+    const anotacao = document.getElementById("mf-anotacao").value;
+    const fotoInput = document.getElementById("mf-foto");
+
+    let fotoUrl = idExistente ? (state.momentos.find(function(m){ return m.id===idExistente; })||{}).fotoUrl : null;
+    if (fotoInput && fotoInput.files && fotoInput.files[0]) {
+      const file = fotoInput.files[0];
+      const fileName = Date.now()+"_"+file.name.replace(/[^a-zA-Z0-9.\-_]/g,"_");
+      const url = await DB.uploadFotoMomento(file, fileName);
+      if (url) fotoUrl = url;
+    }
+
+    const momento = { id: idExistente||undefined, titulo: titulo, data: data, anotacao: anotacao, fotoUrl: fotoUrl };
+    const salvo = await DB.upsertMomento(momento);
+    if (salvo) {
+      if (idExistente) state.momentos = state.momentos.map(function(m){ return m.id===idExistente ? salvo : m; });
+      else state.momentos.push(salvo);
+
+      const pessoasSel = state.momentoFormPessoasSel || [];
+      const tagsSel = state.momentoFormTagsSel || [];
+      const jornadasSel = state.momentoFormJornadasSel || [];
+      await DB.setMomentoPessoas(salvo.id, pessoasSel);
+      await DB.setMomentoTags(salvo.id, tagsSel);
+      await DB.setMomentoJornadas(salvo.id, jornadasSel);
+      state.momentoPessoas = state.momentoPessoas.filter(function(mp){ return mp.momento_id!==salvo.id; }).concat(pessoasSel.map(function(pid){ return { momento_id: salvo.id, pessoa_id: pid }; }));
+      state.momentoTags = state.momentoTags.filter(function(mt){ return mt.momento_id!==salvo.id; }).concat(tagsSel.map(function(tid){ return { momento_id: salvo.id, tag_id: tid }; }));
+      state.momentoJornadas = state.momentoJornadas.filter(function(mj){ return mj.momento_id!==salvo.id; }).concat(jornadasSel.map(function(jid){ return { momento_id: salvo.id, jornada_id: jid }; }));
+    }
+    state.momentoFormPessoasSel = [];
+    state.momentoFormTagsSel = [];
+    state.momentoFormJornadasSel = [];
+    state.momentoEditando = null;
+    btnSalvarMomento.disabled = false;
+    state.momentosTab = "lista";
+    render();
+  });
 }
 
 loadData();

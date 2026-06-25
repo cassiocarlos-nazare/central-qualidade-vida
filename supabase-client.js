@@ -339,3 +339,205 @@ Object.assign(DB, {
     return true;
   }
 });
+
+// ============================================================
+// Módulo: Hábitos diários
+// ============================================================
+function rowHabitoToApp(r){
+  return { id: r.id, nome: r.nome, icone: r.icone, cor: r.cor, negativo: r.negativo, ordem: r.ordem, ativo: r.ativo,
+    tipoRecorrencia: r.tipo_recorrencia, diasSemana: r.dias_semana, diasMes: r.dias_mes };
+}
+function appHabitoToRow(h){
+  return { id: (h.id && h.id.length===36)?h.id:undefined, nome: h.nome, icone: h.icone||null, cor: h.cor||null,
+    negativo: h.negativo||false, ordem: h.ordem||0, ativo: h.ativo!==undefined?h.ativo:true,
+    tipo_recorrencia: h.tipoRecorrencia||"diario", dias_semana: h.diasSemana||null, dias_mes: h.diasMes||null };
+}
+function rowRegistroHabitoToApp(r){
+  return { id: r.id, habitoId: r.habito_id, data: r.data, cumprido: r.cumprido };
+}
+function appRegistroHabitoToRow(r){
+  return { id: (r.id && r.id.length===36)?r.id:undefined, habito_id: r.habitoId, data: r.data, cumprido: r.cumprido };
+}
+function rowAnotacaoDiaToApp(r){
+  return { id: r.id, data: r.data, texto: r.texto };
+}
+
+Object.assign(DB, {
+  async getHabitos(){
+    const { data, error } = await sb.from("habitos").select("*").order("ordem", { ascending: true });
+    if (error) { console.error("Erro ao buscar hábitos:", error); return []; }
+    return data.map(rowHabitoToApp);
+  },
+  async upsertHabito(h){
+    const row = appHabitoToRow(h);
+    const { data, error } = await sb.from("habitos").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar hábito:", error); return null; }
+    return rowHabitoToApp(data);
+  },
+  async bulkInsertHabitos(lista){
+    const rows = lista.map(appHabitoToRow).map(function(r){ delete r.id; return r; });
+    const { error } = await sb.from("habitos").insert(rows);
+    if (error) { console.error("Erro na carga inicial de hábitos:", error); return false; }
+    return true;
+  },
+
+  async getRegistrosHabitos(){
+    const { data, error } = await sb.from("registros_habitos_dia").select("*").order("data", { ascending: true });
+    if (error) { console.error("Erro ao buscar registros de hábitos:", error); return []; }
+    return data.map(rowRegistroHabitoToApp);
+  },
+  async upsertRegistroHabito(r){
+    const row = appRegistroHabitoToRow(r);
+    const { data, error } = await sb.from("registros_habitos_dia").upsert(row, { onConflict: "habito_id,data" }).select().single();
+    if (error) { console.error("Erro ao salvar registro de hábito:", error); return null; }
+    return rowRegistroHabitoToApp(data);
+  },
+
+  async getAnotacoesDia(){
+    const { data, error } = await sb.from("anotacoes_dia").select("*").order("data", { ascending: true });
+    if (error) { console.error("Erro ao buscar anotações:", error); return []; }
+    return data.map(rowAnotacaoDiaToApp);
+  },
+  async upsertAnotacaoDia(data_, texto){
+    const { data, error } = await sb.from("anotacoes_dia").upsert({ data: data_, texto: texto }, { onConflict: "data" }).select().single();
+    if (error) { console.error("Erro ao salvar anotação:", error); return null; }
+    return rowAnotacaoDiaToApp(data);
+  },
+
+  async contarHabitos(){
+    const { count } = await sb.from("habitos").select("id", { count: "exact", head: true });
+    return count || 0;
+  }
+});
+
+// ============================================================
+// Módulo: Registro de Momentos
+// ============================================================
+function rowPessoaToApp(r){ return { id: r.id, nome: r.nome, ativo: r.ativo!==false }; }
+function rowTagMomentoToApp(r){ return { id: r.id, nome: r.nome, categoria: r.categoria, ativo: r.ativo!==false }; }
+function rowJornadaToApp(r){ return { id: r.id, nome: r.nome, descricao: r.descricao, ativo: r.ativo!==false }; }
+function rowMomentoToApp(r){
+  return { id: r.id, titulo: r.titulo, data: r.data, anotacao: r.anotacao, fotoUrl: r.foto_url };
+}
+function appMomentoToRow(m){
+  return { id: (m.id && m.id.length===36)?m.id:undefined, titulo: m.titulo, data: m.data, anotacao: m.anotacao||null, foto_url: m.fotoUrl||null };
+}
+
+Object.assign(DB, {
+  async getPessoas(){
+    const { data, error } = await sb.from("pessoas").select("*").order("nome", { ascending: true });
+    if (error) { console.error("Erro ao buscar pessoas:", error); return []; }
+    return data.map(rowPessoaToApp);
+  },
+  async upsertPessoa(nome){
+    const { data, error } = await sb.from("pessoas").upsert({ nome: nome }, { onConflict: "nome" }).select().single();
+    if (error) { console.error("Erro ao salvar pessoa:", error); return null; }
+    return rowPessoaToApp(data);
+  },
+  async bulkInsertPessoas(nomes){
+    const rows = nomes.map(function(n){ return { nome: n }; });
+    const { error } = await sb.from("pessoas").insert(rows);
+    if (error) { console.error("Erro na carga inicial de pessoas:", error); return false; }
+    return true;
+  },
+  async contarPessoas(){ const { count } = await sb.from("pessoas").select("id", { count: "exact", head: true }); return count || 0; },
+
+  async getTagsMomentos(){
+    const { data, error } = await sb.from("tags_momentos").select("*").order("nome", { ascending: true });
+    if (error) { console.error("Erro ao buscar tags:", error); return []; }
+    return data.map(rowTagMomentoToApp);
+  },
+  async upsertTagMomento(nome){
+    const { data, error } = await sb.from("tags_momentos").upsert({ nome: nome }, { onConflict: "nome" }).select().single();
+    if (error) { console.error("Erro ao salvar tag:", error); return null; }
+    return rowTagMomentoToApp(data);
+  },
+  async bulkInsertTagsMomentos(nomes){
+    const rows = nomes.map(function(n){ return { nome: n }; });
+    const { error } = await sb.from("tags_momentos").insert(rows);
+    if (error) { console.error("Erro na carga inicial de tags:", error); return false; }
+    return true;
+  },
+  async contarTagsMomentos(){ const { count } = await sb.from("tags_momentos").select("id", { count: "exact", head: true }); return count || 0; },
+
+  async getJornadas(){
+    const { data, error } = await sb.from("jornadas").select("*").order("nome", { ascending: true });
+    if (error) { console.error("Erro ao buscar jornadas:", error); return []; }
+    return data.map(rowJornadaToApp);
+  },
+  async bulkInsertJornadas(lista){
+    const { error } = await sb.from("jornadas").insert(lista);
+    if (error) { console.error("Erro na carga inicial de jornadas:", error); return false; }
+    return true;
+  },
+  async contarJornadas(){ const { count } = await sb.from("jornadas").select("id", { count: "exact", head: true }); return count || 0; },
+
+  async getMomentos(){
+    const { data, error } = await sb.from("momentos").select("*").order("data", { ascending: false });
+    if (error) { console.error("Erro ao buscar momentos:", error); return []; }
+    return data.map(rowMomentoToApp);
+  },
+  async upsertMomento(m){
+    const row = appMomentoToRow(m);
+    const { data, error } = await sb.from("momentos").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar momento:", error); return null; }
+    return rowMomentoToApp(data);
+  },
+  async deleteMomento(id){
+    const { error } = await sb.from("momentos").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir momento:", error); return false; }
+    return true;
+  },
+
+  async getMomentoPessoas(){
+    const { data, error } = await sb.from("momento_pessoas").select("*");
+    if (error) { console.error("Erro ao buscar relação momento-pessoas:", error); return []; }
+    return data;
+  },
+  async setMomentoPessoas(momentoId, pessoaIds){
+    await sb.from("momento_pessoas").delete().eq("momento_id", momentoId);
+    if (pessoaIds.length) {
+      const rows = pessoaIds.map(function(pid){ return { momento_id: momentoId, pessoa_id: pid }; });
+      const { error } = await sb.from("momento_pessoas").insert(rows);
+      if (error) { console.error("Erro ao salvar pessoas do momento:", error); return false; }
+    }
+    return true;
+  },
+
+  async getMomentoTags(){
+    const { data, error } = await sb.from("momento_tags").select("*");
+    if (error) { console.error("Erro ao buscar relação momento-tags:", error); return []; }
+    return data;
+  },
+  async setMomentoTags(momentoId, tagIds){
+    await sb.from("momento_tags").delete().eq("momento_id", momentoId);
+    if (tagIds.length) {
+      const rows = tagIds.map(function(tid){ return { momento_id: momentoId, tag_id: tid }; });
+      const { error } = await sb.from("momento_tags").insert(rows);
+      if (error) { console.error("Erro ao salvar tags do momento:", error); return false; }
+    }
+    return true;
+  },
+
+  async getMomentoJornadas(){
+    const { data, error } = await sb.from("momento_jornadas").select("*");
+    if (error) { console.error("Erro ao buscar relação momento-jornadas:", error); return []; }
+    return data;
+  },
+  async setMomentoJornadas(momentoId, jornadaIds){
+    await sb.from("momento_jornadas").delete().eq("momento_id", momentoId);
+    if (jornadaIds.length) {
+      const rows = jornadaIds.map(function(jid){ return { momento_id: momentoId, jornada_id: jid }; });
+      const { error } = await sb.from("momento_jornadas").insert(rows);
+      if (error) { console.error("Erro ao salvar jornadas do momento:", error); return false; }
+    }
+    return true;
+  },
+
+  async uploadFotoMomento(file, fileName){
+    const { data, error } = await sb.storage.from("momentos-fotos").upload(fileName, file, { upsert: true });
+    if (error) { console.error("Erro ao enviar foto:", error); return null; }
+    const { data: urlData } = sb.storage.from("momentos-fotos").getPublicUrl(fileName);
+    return urlData.publicUrl;
+  }
+});
