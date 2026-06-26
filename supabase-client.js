@@ -344,13 +344,17 @@ Object.assign(DB, {
 // Módulo: Hábitos diários
 // ============================================================
 function rowHabitoToApp(r){
-  return { id: r.id, nome: r.nome, icone: r.icone, cor: r.cor, negativo: r.negativo, ordem: r.ordem, ativo: r.ativo,
-    tipoRecorrencia: r.tipo_recorrencia, diasSemana: r.dias_semana, diasMes: r.dias_mes };
+  return { id: r.id, nome: r.nome, icone: r.icone, cor: r.cor, negativo: r.negativo, ordem: r.ordem, ativo: r.ativo!==false,
+    tipoRecorrencia: r.tipo_recorrencia, diasSemana: r.dias_semana, diasMes: r.dias_mes,
+    diasConfiguravel: r.dias_configuravel, repeteMensalmente: r.repete_mensalmente,
+    controlaMeta: r.controla_meta!==false, metaPercentual: r.meta_percentual!==null&&r.meta_percentual!==undefined?r.meta_percentual:80 };
 }
 function appHabitoToRow(h){
   return { id: (h.id && h.id.length===36)?h.id:undefined, nome: h.nome, icone: h.icone||null, cor: h.cor||null,
     negativo: h.negativo||false, ordem: h.ordem||0, ativo: h.ativo!==undefined?h.ativo:true,
-    tipo_recorrencia: h.tipoRecorrencia||"diario", dias_semana: h.diasSemana||null, dias_mes: h.diasMes||null };
+    tipo_recorrencia: h.tipoRecorrencia||"diario", dias_semana: h.diasSemana||null, dias_mes: h.diasMes||null,
+    dias_configuravel: h.diasConfiguravel||null, repete_mensalmente: h.repeteMensalmente||false,
+    controla_meta: h.controlaMeta!==undefined?h.controlaMeta:true, meta_percentual: h.metaPercentual!==undefined?h.metaPercentual:80 };
 }
 function rowRegistroHabitoToApp(r){
   return { id: r.id, habitoId: r.habito_id, data: r.data, cumprido: r.cumprido };
@@ -373,6 +377,11 @@ Object.assign(DB, {
     const { data, error } = await sb.from("habitos").upsert(row).select().single();
     if (error) { console.error("Erro ao salvar hábito:", error); return null; }
     return rowHabitoToApp(data);
+  },
+  async deleteHabito(id){
+    const { error } = await sb.from("habitos").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir hábito:", error); return false; }
+    return true;
   },
   async bulkInsertHabitos(lista){
     const rows = lista.map(appHabitoToRow).map(function(r){ delete r.id; return r; });

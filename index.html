@@ -2,8 +2,20 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Central · Cássio</title>
+
+<!-- PWA: manifest e identidade do app instalado -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B0E14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Central">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="icon" href="icons/favicon-16.png" sizes="16x16">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -89,6 +101,7 @@ input, select, textarea{ font-family: var(--font-body); }
 .main{ flex: 1; margin-left: var(--sidebar-w); min-width: 0; }
 .topbar{
   display: none; align-items: center; justify-content: space-between; padding: 14px 20px;
+  padding-top: calc(14px + env(safe-area-inset-top));
   background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 50;
 }
 .menu-btn{ width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); }
@@ -107,11 +120,11 @@ input, select, textarea{ font-family: var(--font-body); }
 .scrim{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; }
 
 @media (max-width: 900px){
-  .sidebar{ transform: translateX(-100%); box-shadow: 0 0 40px rgba(0,0,0,0.5); }
+  .sidebar{ transform: translateX(-100%); box-shadow: 0 0 40px rgba(0,0,0,0.5); padding-top: calc(24px + env(safe-area-inset-top)); }
   .sidebar.is-open{ transform: translateX(0); }
   .main{ margin-left: 0; }
   .topbar{ display: flex; }
-  .content{ padding: 22px 18px 48px; }
+  .content{ padding: 22px 18px calc(48px + env(safe-area-inset-bottom)); }
   .scrim.is-open{ display: block; }
 }
 
@@ -258,5 +271,14 @@ input, select, textarea{ font-family: var(--font-body); }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-client.js"></script>
 <script src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(err){
+        console.error("Falha ao registrar Service Worker:", err);
+      });
+    });
+  }
+</script>
 </body>
 </html>

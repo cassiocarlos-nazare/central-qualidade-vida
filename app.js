@@ -1733,6 +1733,14 @@ function habitoAplicavelNoDia(habito, dataIso){
   if (habito.tipoRecorrencia === "diario") return true;
   if (habito.tipoRecorrencia === "semanal") return (habito.diasSemana||[]).indexOf(diaSemana) >= 0;
   if (habito.tipoRecorrencia === "mensal") return (habito.diasMes||[]).indexOf(diaMes) >= 0;
+  if (habito.tipoRecorrencia === "configuravel") {
+    if (habito.repeteMensalmente) {
+      // dias_configuravel guarda números de dia (como string), repete todo mês
+      return (habito.diasConfiguravel||[]).map(Number).indexOf(diaMes) >= 0;
+    }
+    // dias_configuravel guarda datas completas (yyyy-mm-dd), válido só naquele mês específico
+    return (habito.diasConfiguravel||[]).indexOf(dataIso) >= 0;
+  }
   return true;
 }
 
@@ -1750,9 +1758,13 @@ function registroHabitoNoDia(habitoId, dataIso){
 function scoreDisciplinaDia(dataIso){
   // Para o cálculo no dashboard de dias passados, considera os hábitos que tinham
   // QUALQUER registro nesse dia (cumprido ou não) — preserva histórico mesmo se o
-  // hábito for inativado depois.
-  const idsComRegistro = state.registrosHabitos.filter(function(r){ return r.data===dataIso; }).map(function(r){ return r.habitoId; });
-  const aplicaveisHoje = habitosAplicaveisNoDia(dataIso, false).map(function(h){ return h.id; });
+  // hábito for inativado depois. Hábitos com controlaMeta=false não entram no score.
+  const habitoControlaMeta = function(id){
+    const h = state.habitos.find(function(x){ return x.id===id; });
+    return h ? h.controlaMeta !== false : true;
+  };
+  const idsComRegistro = state.registrosHabitos.filter(function(r){ return r.data===dataIso; }).map(function(r){ return r.habitoId; }).filter(habitoControlaMeta);
+  const aplicaveisHoje = habitosAplicaveisNoDia(dataIso, false).filter(function(h){ return h.controlaMeta !== false; }).map(function(h){ return h.id; });
   const idsRelevantes = Array.from(new Set([...idsComRegistro, ...aplicaveisHoje]));
   if (!idsRelevantes.length) return null;
   const cumpridos = idsRelevantes.filter(function(id){
@@ -1791,25 +1803,27 @@ function renderDashboardHabitos(){
   const scoresPeriodo = dias.map(scoreDisciplinaDia).filter(function(s){ return s!==null; });
   const mediaPeriodo = scoresPeriodo.length ? Math.round(avg(scoresPeriodo)) : null;
 
-  // Consistência por hábito ativo no período
+  // Consistência por hábito ativo no período (somente os que controlam meta entram em "em dia")
   const habitosAtivos = state.habitos.filter(function(h){ return h.ativo; }).sort(function(a,b){ return a.ordem-b.ordem; });
   const consistencia = habitosAtivos.map(function(h){
     const diasAplicaveis = dias.filter(function(d){ return habitoAplicavelNoDia(h, d); });
     const diasCumpridos = diasAplicaveis.filter(function(d){ const r = registroHabitoNoDia(h.id, d); return r && r.cumprido; });
     const pct = diasAplicaveis.length ? Math.round((diasCumpridos.length/diasAplicaveis.length)*100) : null;
-    return { habito: h, pct: pct, total: diasAplicaveis.length, cumpridos: diasCumpridos.length };
+    const meta = h.metaPercentual!==undefined&&h.metaPercentual!==null ? h.metaPercentual : 80;
+    return { habito: h, pct: pct, total: diasAplicaveis.length, cumpridos: diasCumpridos.length, meta: meta };
   });
-  const emDia = consistencia.filter(function(c){ return c.pct!==null && c.pct>=80; });
-  const maisFraco = consistencia.filter(function(c){ return c.pct!==null; }).sort(function(a,b){ return a.pct-b.pct; })[0];
+  const comMetaHabilitada = consistencia.filter(function(c){ return c.habito.controlaMeta !== false; });
+  const emDia = comMetaHabilitada.filter(function(c){ return c.pct!==null && c.pct>=c.meta; });
+  const maisFraco = comMetaHabilitada.filter(function(c){ return c.pct!==null; }).sort(function(a,b){ return a.pct-b.pct; })[0];
 
   return renderPeriodSelector("habitosView") +
     '<div class="grid grid-4" style="margin-bottom:24px;">'+
       metricCard("Disciplina hoje", scoreHoje!==null?scoreHoje+"%":"—", "checklist", null, scoreHoje!==null?corDisciplina(scoreHoje):null) +
       metricCard("Média do período", mediaPeriodo!==null?mediaPeriodo+"%":"—") +
       metricCard("Sequência atual", sequencia+" dia"+(sequencia!==1?"s":"")) +
-      metricCard("Hábitos em dia (≥80%)", emDia.length+" de "+consistencia.length) +
+      metricCard("Hábitos em dia", emDia.length+" de "+comMetaHabilitada.length) +
     '</div>'+
-    (maisFraco ? '<div class="insight-row" style="margin-bottom:20px;">'+icon("bulb")+'<span>O hábito que mais precisa de atenção no período é <strong>'+maisFraco.habito.nome+'</strong>, cumprido em '+maisFraco.pct+'% dos dias aplicáveis.</span></div>' : '')+
+    (maisFraco ? '<div class="insight-row" style="margin-bottom:20px;">'+icon("bulb")+'<span>O hábito que mais precisa de atenção no período é <strong>'+maisFraco.habito.nome+'</strong>, cumprido em '+maisFraco.pct+'% dos dias aplicáveis (meta: '+maisFraco.meta+'%).</span></div>' : '')+
     '<div class="section-title" style="margin-top:0;">Consistência por hábito</div>'+
     consistencia.map(function(c){
       const cor = c.pct!==null ? corDisciplina(c.pct) : "var(--text-faint)";
@@ -1819,7 +1833,38 @@ function renderDashboardHabitos(){
         '<div style="width:90px;"><div style="background:var(--surface-raised);border-radius:6px;height:8px;overflow:hidden;"><div style="background:'+cor+';height:100%;width:'+(c.pct||0)+'%;"></div></div></div>'+
         '<div style="font-family:var(--font-mono);font-size:13px;width:40px;text-align:right;color:'+cor+';">'+(c.pct!==null?c.pct+"%":"—")+'</div>'+
         '</div>';
-    }).join("");
+    }).join("")+
+    renderGradeConsistencia(habitosAtivos, dias);
+}
+
+function renderGradeConsistencia(habitosAtivos, dias){
+  if (!dias.length || !habitosAtivos.length) return "";
+  const limitado = dias.length > 31; // se o período for muito longo (ano), não faz sentido em grade
+  if (limitado) return "";
+  const diasLabels = dias.map(function(d){
+    const dt = new Date(d+"T00:00:00");
+    return { dia: dt.getDate(), semanaLabel: ["D","S","T","Q","Q","S","S"][dt.getDay()] };
+  });
+  return '<div class="section-title">Consistência do período (quadro)</div>'+
+    '<div style="overflow-x:auto;">'+
+    '<table style="border-collapse:collapse;font-size:11px;min-width:100%;">'+
+      '<thead><tr>'+
+        '<th style="text-align:left;padding:4px 8px;color:var(--text-dim);font-weight:500;position:sticky;left:0;background:var(--bg);">Hábito</th>'+
+        diasLabels.map(function(d){ return '<th style="padding:3px 2px;color:var(--text-faint);font-weight:400;min-width:22px;text-align:center;">'+d.dia+'</th>'; }).join("")+
+      '</tr></thead>'+
+      '<tbody>'+
+        habitosAtivos.map(function(h){
+          return '<tr><td style="padding:4px 8px;white-space:nowrap;position:sticky;left:0;background:var(--bg);">'+h.nome+'</td>'+
+            dias.map(function(d){
+              const aplicavel = habitoAplicavelNoDia(h, d);
+              if (!aplicavel) return '<td style="padding:3px 2px;text-align:center;"><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:transparent;"></span></td>';
+              const r = registroHabitoNoDia(h.id, d);
+              const cumprido = r && r.cumprido;
+              return '<td style="padding:3px 2px;text-align:center;"><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:'+(cumprido?"#4ED9A0":"var(--surface-raised)")+';border:1px solid '+(cumprido?"#4ED9A0":"var(--border)")+';"></span></td>';
+            }).join("")+
+          '</tr>';
+        }).join("")+
+      '</tbody></table></div>';
 }
 
 function corDisciplina(pct){
@@ -1885,38 +1930,113 @@ function renderHistoricoHabitos(){
 }
 
 function renderGerenciarHabitos(){
-  const habitosOrdenados = [...state.habitos].sort(function(a,b){ return a.ordem-b.ordem; });
-  return '<button class="btn btn-primary" id="btn-novo-habito" style="margin-bottom:18px;">'+icon("check")+' Novo hábito</button>'+
-    habitosOrdenados.map(function(h){
+  if (!state.habitosFiltroStatus) state.habitosFiltroStatus = "ativos";
+  const filtro = state.habitosFiltroStatus;
+  let habitosFiltrados = [...state.habitos];
+  if (filtro === "ativos") habitosFiltrados = habitosFiltrados.filter(function(h){ return h.ativo; });
+  else if (filtro === "inativos") habitosFiltrados = habitosFiltrados.filter(function(h){ return !h.ativo; });
+  habitosFiltrados.sort(function(a,b){ return a.ordem-b.ordem; });
+
+  const filtros = [{id:"ativos",label:"Ativos"},{id:"inativos",label:"Inativos"},{id:"todos",label:"Todos"}];
+
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px;">'+
+      '<div class="tabs" style="border-bottom:none;margin-bottom:0;">'+
+        filtros.map(function(f){ return '<button class="tab-btn '+(filtro===f.id?'is-active':'')+'" data-habitofiltro="'+f.id+'" style="padding:7px 12px;">'+f.label+'</button>'; }).join("")+
+      '</div>'+
+      '<button class="btn btn-primary" id="btn-novo-habito">'+icon("check")+' Novo hábito</button>'+
+    '</div>'+
+    (habitosFiltrados.length===0 ? '<div class="empty-state">Nenhum hábito nessa categoria.</div>' : '')+
+    habitosFiltrados.map(function(h){
       const recorrenciaTxt = h.tipoRecorrencia==="diario" ? "Todos os dias" :
         h.tipoRecorrencia==="semanal" ? "Dias da semana: "+(h.diasSemana||[]).map(function(d){ return ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][d]; }).join(", ") :
-        "Dias do mês: "+(h.diasMes||[]).join(", ");
+        h.tipoRecorrencia==="mensal" ? "Dias do mês: "+(h.diasMes||[]).join(", ") :
+        "Configurável"+(h.repeteMensalmente?" (repete todo mês)":" (somente este mês)");
+      const metaTxt = h.controlaMeta!==false ? "Meta: "+(h.metaPercentual!==undefined?h.metaPercentual:80)+"%" : "Sem controle de meta";
       return '<div class="list-row"><div class="list-row-main">'+
         '<div class="list-row-title">'+h.nome+(h.negativo?' <span style="font-size:10.5px;color:var(--text-faint);">(evitar)</span>':'')+(!h.ativo?' <span class="module-tile-tag">inativo</span>':'')+'</div>'+
-        '<div class="list-row-sub" style="font-family:var(--font-body);">'+recorrenciaTxt+'</div></div>'+
+        '<div class="list-row-sub" style="font-family:var(--font-body);">'+recorrenciaTxt+' · '+metaTxt+'</div></div>'+
         '<button class="icon-btn" data-editarhabito="'+h.id+'" aria-label="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4h2M4 14.5V20h5.5L20 9.5 14.5 4 4 14.5z"/></svg></button>'+
         '<button class="icon-btn" data-toggleativohabito="'+h.id+'" aria-label="'+(h.ativo?"Inativar":"Ativar")+'">'+(h.ativo?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg>')+'</button>'+
+        '<button class="icon-btn" data-excluirhabito="'+h.id+'" aria-label="Excluir permanentemente">'+icon("trash")+'</button>'+
         '</div>';
     }).join("") +
     (state.habitoFormAberto ? renderFormHabito() : "");
 }
 
+function gerarCalendarioConfiguravel(habito){
+  const hoje = new Date();
+  const mesRef = state.habitoCalendarioMesRef || new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
+  const primeiroDia = new Date(ano, mes, 1);
+  const ultimoDia = new Date(ano, mes+1, 0);
+  const diasNoMes = ultimoDia.getDate();
+  const offsetSemana = primeiroDia.getDay();
+
+  const diasSelecionados = state.habitoDiasConfigSel || [];
+  const repeteMensalmente = state.habitoRepeteMensalmente || false;
+
+  function diaEstaSelecionado(dia){
+    if (repeteMensalmente) return diasSelecionados.indexOf(dia) >= 0;
+    const iso = ano+"-"+String(mes+1).padStart(2,"0")+"-"+String(dia).padStart(2,"0");
+    return diasSelecionados.indexOf(iso) >= 0;
+  }
+
+  const labelMes = capitalizeMonthLabel(mesRef.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}));
+  let celulas = "";
+  for (let i=0; i<offsetSemana; i++) celulas += '<div></div>';
+  for (let dia=1; dia<=diasNoMes; dia++) {
+    const sel = diaEstaSelecionado(dia);
+    celulas += '<button type="button" class="hf-dia-config-btn" data-diaconfig="'+dia+'" style="width:32px;height:32px;border-radius:8px;border:1px solid '+(sel?"var(--purple)":"var(--border)")+';background:'+(sel?"var(--purple-dim)":"var(--surface-raised)")+';color:'+(sel?"var(--text)":"var(--text-dim)")+';font-size:12px;">'+dia+'</button>';
+  }
+
+  let preview = "";
+  if (repeteMensalmente && diasSelecionados.length) {
+    const proximoMes = new Date(ano, mes+1, 1);
+    const labelProximo = capitalizeMonthLabel(proximoMes.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}));
+    preview = '<p style="font-size:11.5px;color:var(--text-faint);margin-top:10px;">Como repete mensalmente, em '+labelProximo+' os dias marcados serão: '+diasSelecionados.slice().sort(function(a,b){return a-b;}).join(", ")+'</p>';
+  }
+
+  return '<div style="margin-top:8px;">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'+
+      '<button type="button" class="icon-btn" data-calmesprev="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>'+
+      '<span style="font-size:13px;font-weight:500;">'+labelMes+'</span>'+
+      '<button type="button" class="icon-btn" data-calmesnext="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:280px;">'+
+      ["D","S","T","Q","Q","S","S"].map(function(l){ return '<div style="text-align:center;font-size:10px;color:var(--text-faint);">'+l+'</div>'; }).join("")+
+      celulas+
+    '</div>'+
+    '<label class="checkbox-field" style="margin-top:12px;"><input type="checkbox" id="hf-repete-mensalmente" '+(repeteMensalmente?"checked":"")+' /> Repete mensalmente</label>'+
+    preview+
+  '</div>';
+}
+
 function renderFormHabito(){
   const h = state.habitoEditando ? state.habitos.find(function(x){ return x.id===state.habitoEditando; }) : null;
-  const tipo = h ? h.tipoRecorrencia : "diario";
+  const tipo = state.habitoFormTipoSelecionado || (h ? h.tipoRecorrencia : "diario");
   const diasSemanaSel = h ? (h.diasSemana||[]) : [];
   const diasMesSel = h ? (h.diasMes||[]) : [];
   const diasSemanaLabels = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  const controlaMeta = state.habitoFormControlaMeta!==undefined ? state.habitoFormControlaMeta : (h ? h.controlaMeta!==false : true);
+  const metaPercentual = state.habitoFormMetaPercentual!==undefined ? state.habitoFormMetaPercentual : (h ? (h.metaPercentual!==undefined?h.metaPercentual:80) : 80);
+  const nomeAtual = state.habitoFormNome!==undefined ? state.habitoFormNome : (h ? h.nome : "");
+  const negativoAtual = state.habitoFormNegativo!==undefined ? state.habitoFormNegativo : (h ? h.negativo : false);
+
+  if (state.habitoDiasConfigSel === undefined && tipo==="configuravel") {
+    state.habitoDiasConfigSel = h ? (h.diasConfiguravel||[]).map(function(d){ return h.repeteMensalmente ? Number(d) : d; }) : [];
+    state.habitoRepeteMensalmente = h ? !!h.repeteMensalmente : false;
+  }
 
   return '<div class="card" style="margin-top:16px;">'+
     '<p style="font-size:14px;font-weight:500;margin:0 0 14px;">'+(h?"Editar hábito":"Novo hábito")+'</p>'+
     '<div class="form-grid">'+
-    field("Nome do hábito", '<input type="text" id="hf-nome" value="'+(h?h.nome:"")+'" placeholder="ex: Meditação" />') +
-    '<label class="checkbox-field"><input type="checkbox" id="hf-negativo" '+(h&&h.negativo?"checked":"")+' /> Hábito negativo (marcar como cumprido quando EVITAR o comportamento)</label>'+
+    field("Nome do hábito", '<input type="text" id="hf-nome" value="'+nomeAtual+'" placeholder="ex: Meditação" />') +
+    '<label class="checkbox-field"><input type="checkbox" id="hf-negativo" '+(negativoAtual?"checked":"")+' /> Hábito negativo (marcar como cumprido quando EVITAR o comportamento)</label>'+
     field("Recorrência", '<select id="hf-tipo">'+
-      '<option value="diario" '+(tipo==="diario"?"selected":"")+'>Todos os dias</option>'+
-      '<option value="semanal" '+(tipo==="semanal"?"selected":"")+'>Dias específicos da semana</option>'+
-      '<option value="mensal" '+(tipo==="mensal"?"selected":"")+'>Dias específicos do mês</option>'+
+      '<option value="diario" '+(tipo==="diario"?"selected":"")+'>Diário (todos os dias)</option>'+
+      '<option value="semanal" '+(tipo==="semanal"?"selected":"")+'>Semanal (dias específicos da semana)</option>'+
+      '<option value="mensal" '+(tipo==="mensal"?"selected":"")+'>Mensal (dias específicos do mês)</option>'+
+      '<option value="configuravel" '+(tipo==="configuravel"?"selected":"")+'>Configurável (escolher no calendário)</option>'+
       '</select>') +
     '<div id="hf-dias-semana" style="display:'+(tipo==="semanal"?"flex":"none")+';gap:6px;flex-wrap:wrap;">'+
       diasSemanaLabels.map(function(lbl, i){ return '<button type="button" class="hf-dia-semana-btn tab-btn '+(diasSemanaSel.indexOf(i)>=0?"is-active":"")+'" data-dia="'+i+'" style="padding:6px 10px;">'+lbl+'</button>'; }).join("")+
@@ -1924,6 +2044,15 @@ function renderFormHabito(){
     '<div id="hf-dias-mes" style="display:'+(tipo==="mensal"?"block":"none")+';">'+
       '<input type="text" id="hf-dias-mes-input" value="'+diasMesSel.join(", ")+'" placeholder="ex: 1, 15, 30" />'+
       '<p style="font-size:11.5px;color:var(--text-faint);margin-top:4px;">Dias do mês separados por vírgula</p>'+
+    '</div>'+
+    '<div id="hf-dias-configuravel" style="display:'+(tipo==="configuravel"?"block":"none")+';">'+
+      gerarCalendarioConfiguravel(h)+
+    '</div>'+
+    '<div style="border-top:1px solid var(--border);padding-top:14px;margin-top:6px;">'+
+      '<label class="checkbox-field"><input type="checkbox" id="hf-controla-meta" '+(controlaMeta?"checked":"")+' /> Controla meta (entra nos cálculos de disciplina e dashboards)</label>'+
+      '<div id="hf-meta-percentual-wrap" style="display:'+(controlaMeta?"block":"none")+';margin-top:10px;">'+
+        field("Percentual de meta para este hábito", '<input type="number" id="hf-meta-percentual" min="1" max="100" value="'+metaPercentual+'" />') +
+      '</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;">'+
       '<button class="btn btn-primary" id="btn-salvar-habito" '+(h?'data-id="'+h.id+'"':'')+'>'+icon("check")+' Salvar</button>'+
@@ -2595,9 +2724,23 @@ function attachHandlers(){
     if (msg) { msg.style.display="flex"; setTimeout(function(){ if(msg) msg.style.display="none"; },2500); }
   });
 
+  document.querySelectorAll("[data-habitofiltro]").forEach(function(btn){ btn.addEventListener("click", function(){ state.habitosFiltroStatus = btn.getAttribute("data-habitofiltro"); render(); }); });
+
   const btnNovoHabito = document.getElementById("btn-novo-habito");
-  if (btnNovoHabito) btnNovoHabito.addEventListener("click", function(){ state.habitoEditando = null; state.habitoFormAberto = true; render(); });
-  document.querySelectorAll("[data-editarhabito]").forEach(function(btn){ btn.addEventListener("click", function(){ state.habitoEditando = btn.getAttribute("data-editarhabito"); state.habitoFormAberto = true; render(); }); });
+  if (btnNovoHabito) btnNovoHabito.addEventListener("click", function(){
+    state.habitoEditando = null; state.habitoFormAberto = true;
+    state.habitoDiasConfigSel = undefined; state.habitoFormTipoSelecionado = undefined; state.habitoFormControlaMeta = undefined;
+    state.habitoFormNome = undefined; state.habitoFormNegativo = undefined; state.habitoFormMetaPercentual = undefined;
+    state.habitoCalendarioMesRef = null;
+    render();
+  });
+  document.querySelectorAll("[data-editarhabito]").forEach(function(btn){ btn.addEventListener("click", function(){
+    state.habitoEditando = btn.getAttribute("data-editarhabito"); state.habitoFormAberto = true;
+    state.habitoDiasConfigSel = undefined; state.habitoFormTipoSelecionado = undefined; state.habitoFormControlaMeta = undefined;
+    state.habitoFormNome = undefined; state.habitoFormNegativo = undefined; state.habitoFormMetaPercentual = undefined;
+    state.habitoCalendarioMesRef = null;
+    render();
+  }); });
   const btnCancelarHabito = document.getElementById("btn-cancelar-habito");
   if (btnCancelarHabito) btnCancelarHabito.addEventListener("click", function(){ state.habitoFormAberto = false; render(); });
 
@@ -2611,12 +2754,87 @@ function attachHandlers(){
     render();
   }); });
 
+  document.querySelectorAll("[data-excluirhabito]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    const id = btn.getAttribute("data-excluirhabito");
+    const confirmado = confirm("Excluir este hábito permanentemente? Os registros históricos associados também serão removidos. Esta ação não pode ser desfeita.");
+    if (!confirmado) return;
+    await DB.deleteHabito(id);
+    state.habitos = state.habitos.filter(function(h){ return h.id!==id; });
+    state.registrosHabitos = state.registrosHabitos.filter(function(r){ return r.habitoId!==id; });
+    render();
+  }); });
+
   const hfTipo = document.getElementById("hf-tipo");
   if (hfTipo) hfTipo.addEventListener("change", function(){
-    document.getElementById("hf-dias-semana").style.display = hfTipo.value==="semanal" ? "flex" : "none";
-    document.getElementById("hf-dias-mes").style.display = hfTipo.value==="mensal" ? "block" : "none";
+    state.habitoFormTipoSelecionado = hfTipo.value;
+    if (hfTipo.value === "configuravel" && state.habitoDiasConfigSel === undefined) state.habitoDiasConfigSel = [];
+    render();
   });
   document.querySelectorAll(".hf-dia-semana-btn").forEach(function(btn){ btn.addEventListener("click", function(){ btn.classList.toggle("is-active"); }); });
+
+  document.querySelectorAll(".hf-dia-config-btn").forEach(function(btn){ btn.addEventListener("click", function(){
+    const dia = Number(btn.getAttribute("data-diaconfig"));
+    if (!state.habitoDiasConfigSel) state.habitoDiasConfigSel = [];
+    const repeteMensalmente = state.habitoRepeteMensalmente || false;
+    const mesRef = state.habitoCalendarioMesRef || new Date();
+    if (repeteMensalmente) {
+      const idx = state.habitoDiasConfigSel.indexOf(dia);
+      if (idx>=0) state.habitoDiasConfigSel.splice(idx,1); else state.habitoDiasConfigSel.push(dia);
+    } else {
+      const iso = mesRef.getFullYear()+"-"+String(mesRef.getMonth()+1).padStart(2,"0")+"-"+String(dia).padStart(2,"0");
+      const idx = state.habitoDiasConfigSel.indexOf(iso);
+      if (idx>=0) state.habitoDiasConfigSel.splice(idx,1); else state.habitoDiasConfigSel.push(iso);
+    }
+    render();
+  }); });
+
+  const hfRepeteMensalmente = document.getElementById("hf-repete-mensalmente");
+  if (hfRepeteMensalmente) hfRepeteMensalmente.addEventListener("change", function(){
+    const novoRepete = hfRepeteMensalmente.checked;
+    // Converte a seleção existente para o novo formato em vez de descartar
+    const selAtual = state.habitoDiasConfigSel || [];
+    const mesRef = state.habitoCalendarioMesRef || new Date();
+    if (novoRepete) {
+      // de datas completas (yyyy-mm-dd) -> números de dia
+      state.habitoDiasConfigSel = Array.from(new Set(selAtual.map(function(v){
+        return typeof v === "string" && v.indexOf("-")>=0 ? Number(v.split("-")[2]) : Number(v);
+      })));
+    } else {
+      // de números de dia -> datas completas no mês de referência
+      state.habitoDiasConfigSel = selAtual.map(function(v){
+        const dia = Number(v);
+        return mesRef.getFullYear()+"-"+String(mesRef.getMonth()+1).padStart(2,"0")+"-"+String(dia).padStart(2,"0");
+      });
+    }
+    state.habitoRepeteMensalmente = novoRepete;
+    render();
+  });
+
+  const btnCalMesPrev = document.querySelector("[data-calmesprev]");
+  if (btnCalMesPrev) btnCalMesPrev.addEventListener("click", function(){
+    const ref = state.habitoCalendarioMesRef || new Date();
+    state.habitoCalendarioMesRef = new Date(ref.getFullYear(), ref.getMonth()-1, 1);
+    render();
+  });
+  const btnCalMesNext = document.querySelector("[data-calmesnext]");
+  if (btnCalMesNext) btnCalMesNext.addEventListener("click", function(){
+    const ref = state.habitoCalendarioMesRef || new Date();
+    state.habitoCalendarioMesRef = new Date(ref.getFullYear(), ref.getMonth()+1, 1);
+    render();
+  });
+
+  const hfControlaMeta = document.getElementById("hf-controla-meta");
+  if (hfControlaMeta) hfControlaMeta.addEventListener("change", function(){
+    state.habitoFormControlaMeta = hfControlaMeta.checked;
+    render();
+  });
+
+  const hfNome = document.getElementById("hf-nome");
+  if (hfNome) hfNome.addEventListener("input", function(){ state.habitoFormNome = hfNome.value; });
+  const hfNegativo = document.getElementById("hf-negativo");
+  if (hfNegativo) hfNegativo.addEventListener("change", function(){ state.habitoFormNegativo = hfNegativo.checked; });
+  const hfMetaPercentual = document.getElementById("hf-meta-percentual");
+  if (hfMetaPercentual) hfMetaPercentual.addEventListener("input", function(){ state.habitoFormMetaPercentual = Number(hfMetaPercentual.value); });
 
   const btnSalvarHabito = document.getElementById("btn-salvar-habito");
   if (btnSalvarHabito) btnSalvarHabito.addEventListener("click", async function(){
@@ -2625,15 +2843,21 @@ function attachHandlers(){
     if (!nome) return;
     const tipo = document.getElementById("hf-tipo").value;
     const negativo = document.getElementById("hf-negativo").checked;
-    let diasSemana = null, diasMes = null;
+    const controlaMeta = document.getElementById("hf-controla-meta").checked;
+    const metaPercentual = controlaMeta ? (Number(document.getElementById("hf-meta-percentual").value)||80) : 80;
+    let diasSemana = null, diasMes = null, diasConfiguravel = null, repeteMensalmente = false;
     if (tipo==="semanal") {
       diasSemana = Array.from(document.querySelectorAll(".hf-dia-semana-btn.is-active")).map(function(b){ return Number(b.getAttribute("data-dia")); });
     } else if (tipo==="mensal") {
       diasMes = document.getElementById("hf-dias-mes-input").value.split(",").map(function(s){ return Number(s.trim()); }).filter(function(n){ return !isNaN(n) && n>=1 && n<=31; });
+    } else if (tipo==="configuravel") {
+      repeteMensalmente = state.habitoRepeteMensalmente || false;
+      diasConfiguravel = (state.habitoDiasConfigSel||[]).map(String);
     }
     const existente = id ? state.habitos.find(function(h){ return h.id===id; }) : null;
     const habito = {
       id: id||undefined, nome: nome, negativo: negativo, tipoRecorrencia: tipo, diasSemana: diasSemana, diasMes: diasMes,
+      diasConfiguravel: diasConfiguravel, repeteMensalmente: repeteMensalmente, controlaMeta: controlaMeta, metaPercentual: metaPercentual,
       icone: existente?existente.icone:"checklist", ordem: existente?existente.ordem:state.habitos.length, ativo: existente?existente.ativo:true
     };
     const salvo = await DB.upsertHabito(habito);
