@@ -888,144 +888,6 @@ function gerarAnaliseConstanciaIA(constancia){
   return textos;
 }
 
-function calcularEficienciaSono(grupos){
-  const comAmbos = grupos.filter(function(g){ return g.horasNaCama>0 && g.horasSonoReal>0; });
-  if (!comAmbos.length) return null;
-  const mediaTotal = avg(comAmbos.map(function(g){ return g.horasNaCama; }));
-  const mediaReal = avg(comAmbos.map(function(g){ return g.horasSonoReal; }));
-  if (!mediaTotal) return null;
-  return { pct: (mediaReal/mediaTotal)*100, mediaTotal: mediaTotal, mediaReal: mediaReal, diferenca: mediaTotal-mediaReal };
-}
-
-// ---------- Especialista em Sono: análise completa de 4 seções ----------
-// Baseado em medicina do sono, ciência de dados de saúde e coaching de alta
-// performance. Opera sobre o período filtrado (1 noite ou agregado de várias).
-
-function gerarAnaliseEspecialistaSono(grupos, remProfundo, constancia, eficiencia, mediaHorasReal, periodoLabel, nDias){
-  const secoes = {};
-  const ehUmaNoite = nDias === 1;
-
-  // ===== SEÇÃO 1: Análise completa e profunda dos dados =====
-  const s1 = [];
-  if (eficiencia !== null) {
-    const efTxt = eficiencia.pct.toFixed(1)+"%";
-    let efAvaliacao;
-    if (eficiencia.pct >= 90) efAvaliacao = "excelente — quase todo o tempo na cama foi de fato sono, com pouquíssimo tempo perdido em despertares ou para pegar no sono";
-    else if (eficiencia.pct >= 85) efAvaliacao = "boa, dentro da faixa considerada saudável";
-    else if (eficiencia.pct >= 75) efAvaliacao = "moderada — uma parcela relevante do tempo na cama não foi sono efetivo";
-    else efAvaliacao = "baixa, indicando fragmentação significativa ou dificuldade para iniciar o sono";
-    s1.push("Eficiência do sono: "+efTxt+" ("+fmtHoras(eficiencia.mediaReal)+" de sono real para cada "+fmtHoras(eficiencia.mediaTotal)+" na cama, em média"+(ehUmaNoite?"":" no período")+"). Isso é considerado "+efAvaliacao+". A diferença de "+fmtHoras(eficiencia.diferenca)+" representa tempo acordado, em transição ou de sono fragmentado não recuperado.");
-  } else {
-    s1.push("Não há dados suficientes de tempo total na cama e tempo de sono real para calcular a eficiência do sono no período.");
-  }
-
-  if (remProfundo.mediaPctRem !== null || remProfundo.mediaPctFundo !== null) {
-    const remTxt = remProfundo.mediaPctRem!==null ? remProfundo.mediaPctRem.toFixed(1)+"%" : "sem dado";
-    const fundoTxt = remProfundo.mediaPctFundo!==null ? remProfundo.mediaPctFundo.toFixed(1)+"%" : "sem dado";
-    s1.push("Arquitetura do sono: REM em "+remTxt+" e sono profundo em "+fundoTxt+" do sono real"+(ehUmaNoite?"":", em média no período")+". A referência ideal para adultos gira em torno de 20–25% para cada uma dessas fases. REM concentra-se na segunda metade da noite e está ligado à restauração cognitiva, consolidação de memória e criatividade; sono profundo concentra-se na primeira metade e está ligado à recuperação física, tecidual e hormonal."+
-      (remProfundo.statusRem==="abaixo" ? " Seu REM está abaixo dessa faixa." : remProfundo.statusRem==="acima" ? " Seu REM está acima dessa faixa." : remProfundo.statusRem==="dentro" ? " Seu REM está dentro da faixa ideal." : "")+
-      (remProfundo.statusFundo==="abaixo" ? " Seu sono profundo está abaixo dessa faixa." : remProfundo.statusFundo==="acima" ? " Seu sono profundo está acima dessa faixa." : remProfundo.statusFundo==="dentro" ? " Seu sono profundo está dentro da faixa ideal." : ""));
-  } else {
-    s1.push("Arquitetura do sono: não há dados de REM ou sono profundo registrados no período selecionado.");
-  }
-
-  if (constancia) {
-    function classificar(desv){
-      if (desv <= 20) return "muito consistente";
-      if (desv <= 45) return "razoavelmente consistente";
-      if (desv <= 75) return "inconsistente";
-      return "bastante irregular";
-    }
-    s1.push("Sincronia do ritmo circadiano: o horário de dormir variou em média "+Math.round(constancia.desvDormir)+" minutos ("+classificar(constancia.desvDormir)+") e o de acordar "+Math.round(constancia.desvAcordar)+" minutos ("+classificar(constancia.desvAcordar)+") no período. Regularidade de horário é um dos fatores mais determinantes para a sincronização do relógio biológico, frequentemente com mais impacto na qualidade percebida do sono do que o total de horas dormidas.");
-  } else {
-    s1.push("Sincronia do ritmo circadiano: dados insuficientes para avaliar a consistência de horário (é necessário registrar ao menos 3 noites com horário de dormir).");
-  }
-  secoes.analise = s1;
-
-  // ===== SEÇÃO 2: Benefícios esperados para o dia =====
-  const s2 = [];
-  const remOk = remProfundo.statusRem === "dentro" || remProfundo.statusRem === "acima";
-  const fundoOk = remProfundo.statusFundo === "dentro" || remProfundo.statusFundo === "acima";
-  const efOk = eficiencia !== null && eficiencia.pct >= 85;
-  const horasOk = mediaHorasReal !== null && mediaHorasReal >= 7;
-
-  if (remProfundo.mediaPctRem !== null) {
-    s2.push("Capacidade cognitiva e foco: "+(remOk
-      ? "com o nível de REM registrado, a expectativa é de boa clareza mental, tomada de decisão mais ágil e maior facilidade de aprendizado e retenção hoje."
-      : "com o REM abaixo do ideal, é provável sentir mais lentidão no raciocínio, dificuldade de concentração sustentada e memória de curto prazo menos afiada — vale reservar tarefas mais simples ou repetitivas para os momentos de menor energia mental."));
-  }
-  if (remProfundo.mediaPctFundo !== null) {
-    s2.push("Energia física e recuperação muscular: "+(fundoOk
-      ? "o sono profundo registrado sugere boa recuperação tecidual e hormonal — disposição física e resposta imunológica tendem a estar favorecidas hoje."
-      : "o sono profundo abaixo do ideal tende a se traduzir em menor disposição física, recuperação muscular mais lenta (relevante se houver treino hoje) e resposta imunológica um pouco mais vulnerável."));
-  }
-  const humorOk = efOk && horasOk;
-  s2.push("Regulação emocional e resiliência: "+(humorOk
-    ? "com eficiência e duração de sono favoráveis, a expectativa é de maior estabilidade emocional e melhor tolerância a contratempos e estresse ao longo do dia."
-    : "com o sono fragmentado e/ou insuficiente, é comum maior irritabilidade, menor paciência e reações emocionais mais intensas a situações de estresse — vale reconhecer esse efeito antes de decisões importantes ou conversas sensíveis."));
-  secoes.beneficios = s2;
-
-  // ===== SEÇÃO 3: Pontos de atenção e gargalos =====
-  const s3 = [];
-  const candidatos = [];
-  if (eficiencia !== null && eficiencia.pct < 85) candidatos.push({ chave: "eficiencia", gravidade: 85-eficiencia.pct });
-  if (remProfundo.statusFundo === "abaixo") candidatos.push({ chave: "profundo", gravidade: REFERENCIA_SONO.profundoMin-remProfundo.mediaPctFundo });
-  if (remProfundo.statusRem === "abaixo") candidatos.push({ chave: "rem", gravidade: REFERENCIA_SONO.remMin-remProfundo.mediaPctRem });
-  if (constancia && constancia.desvDormir > 45) candidatos.push({ chave: "constancia", gravidade: constancia.desvDormir-45 });
-  if (mediaHorasReal !== null && mediaHorasReal < state.parametros.metaHorasSono - 0.5) candidatos.push({ chave: "duracao", gravidade: (state.parametros.metaHorasSono-mediaHorasReal)*30 });
-
-  if (!candidatos.length) {
-    s3.push("Não foi identificado um gargalo dominante no período: os indicadores analisados (eficiência, REM, sono profundo, constância de horário e duração) estão em níveis saudáveis. O foco agora é manter a rotina atual.");
-  } else {
-    candidatos.sort(function(a,b){ return b.gravidade-a.gravidade; });
-    const principal = candidatos[0].chave;
-    const textosGargalo = {
-      eficiencia: "O principal gargalo é a baixa eficiência do sono — uma parte relevante do tempo na cama não é sono efetivo. As causas mais comuns são: tempo elevado para pegar no sono (alta latência), despertares noturnos frequentes, uso de celular/telas na cama, ou ambiente de sono inadequado (luz, ruído, temperatura).",
-      profundo: "O principal gargalo é o sono profundo abaixo da faixa recomendada. Causas fisiológicas e de rotina comuns: consumo de álcool (que reduz especificamente essa fase), cafeína à tarde/noite, jantar tardio ou pesado, estresse elevado antes de dormir, e ambiente de sono muito iluminado ou quente.",
-      rem: "O principal gargalo é o sono REM abaixo da faixa recomendada. Isso costuma estar associado a duração total de sono insuficiente (REM se concentra no fim da noite e é \"cortado\" quando o sono é encurtado), uso de álcool, ou despertar com alarme no meio de um ciclo de sono.",
-      constancia: "O principal gargalo é a inconsistência do horário de dormir. Horários muito variáveis (incluindo diferenças grandes entre dias de semana e fim de semana) dificultam a sincronização do ritmo circadiano, mesmo quando o total de horas dormidas é adequado.",
-      duracao: "O principal gargalo é a privação crônica leve de sono — a média de horas dormidas está consistentemente abaixo da sua meta. Isso tem efeito cumulativo: o débito de sono se acumula dia após dia e não é compensado totalmente por uma única noite de sono mais longo."
-    };
-    s3.push(textosGargalo[principal]);
-  }
-  secoes.gargalos = s3;
-
-  // ===== SEÇÃO 4: Plano de ação =====
-  const s4 = {};
-  const principal = candidatos.length ? candidatos[0].chave : null;
-
-  const acoesImediatas = {
-    eficiencia: "Busque exposição à luz solar direta nos primeiros 30-60 minutos após acordar — isso ajuda a ancorar o ritmo circadiano e reduz a dificuldade de iniciar o sono na noite seguinte. Evite cafeína após as 15h.",
-    profundo: "Pratique atividade física (mesmo moderada) durante o dia, de preferência não nas 2-3h antes de dormir. Evite álcool esta noite — ele é um dos fatores com maior impacto negativo isolado sobre o sono profundo.",
-    rem: "Evite privação adicional de sono hoje (nada de cortar ainda mais as horas de sono à noite). Se possível, evite álcool, que suprime REM de forma significativa.",
-    constancia: "Mantenha suas atividades e refeições em horários regulares hoje, criando consistência também durante o dia, não só à noite.",
-    duracao: "Avalie se é possível antecipar 30 minutos o horário de ir para a cama hoje, mesmo que pareça pouco — o efeito é cumulativo.",
-    default: "Busque luz solar pela manhã e modere a cafeína após o início da tarde, hábitos que sustentam a qualidade do sono ao longo do tempo."
-  };
-  const protocolosNoite = {
-    eficiencia: "Reduza o uso de telas na última hora antes de dormir e mantenha o quarto escuro, silencioso e com temperatura entre 18-21°C. Se a latência para dormir for alta, considere uma rotina de desaceleração de 20-30 min antes de deitar (leitura física, respiração, alongamento leve).",
-    profundo: "Jante mais leve e com antecedência de pelo menos 2-3h antes de dormir. Mantenha o quarto mais frio (a queda de temperatura corporal favorece sono profundo) e escuro.",
-    rem: "Tente manter um horário de despertar mais consistente, evitando alarmes muito antecipados em relação ao seu ciclo natural. Evite álcool antes de dormir.",
-    constancia: "Defina um horário-alvo fixo para ir para a cama esta noite, o mais próximo possível da sua média habitual, mesmo nos dias de menor compromisso no dia seguinte.",
-    duracao: "Proteja o horário de dormir hoje como uma prioridade não negociável, indo para a cama no horário-alvo mesmo que ainda não esteja com sono — a rotina ajuda o corpo a antecipar o sono.",
-    default: "Mantenha o quarto escuro, silencioso e fresco, e reduza estímulos de tela na última hora antes de dormir."
-  };
-  const metasMetricas = {
-    eficiencia: "Aumentar a eficiência do sono para acima de 85% na próxima noite, reduzindo o tempo acordado na cama.",
-    profundo: "Elevar o percentual de sono profundo para dentro da faixa de "+REFERENCIA_SONO.profundoMin+"–"+REFERENCIA_SONO.profundoMax+"% na próxima noite.",
-    rem: "Elevar o percentual de sono REM para dentro da faixa de "+REFERENCIA_SONO.remMin+"–"+REFERENCIA_SONO.remMax+"% na próxima noite.",
-    constancia: "Reduzir a variação do horário de dormir para menos de 30 minutos em relação à média, na próxima noite.",
-    duracao: "Aproximar a duração do sono real da meta de "+fmtHoras(state.parametros.metaHorasSono)+" na próxima noite.",
-    default: "Manter a duração e a consistência atuais, que já estão em níveis saudáveis."
-  };
-  s4.imediata = acoesImediatas[principal] || acoesImediatas.default;
-  s4.protocolo = protocolosNoite[principal] || protocolosNoite.default;
-  s4.meta = metasMetricas[principal] || metasMetricas.default;
-  secoes.plano = s4;
-
-  return secoes;
-}
-
 function gerarResumoSemanaCorrenteIA(){
   const { start, end } = getSemanaCorrente();
   const grupos = gruposNoIntervalo(start, end);
@@ -1088,15 +950,9 @@ function renderAnaliseSono(){
   const scoreMedia = avg(grupos.map(g=>g.score));
   const remProfundo = analisarRemProfundo(grupos);
   const constancia = analisarConstancia(grupos);
-  const eficiencia = calcularEficienciaSono(grupos);
-  const { label: periodoLabel } = getPeriodoAtual("analiseView");
 
-  const especialista = gerarAnaliseEspecialistaSono(grupos, remProfundo, constancia, eficiencia, media, periodoLabel, grupos.length);
-
-  function blocoSecoes(titulo, lista){
-    return '<div class="section-title">'+titulo+'</div>'+
-      lista.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
-  }
+  const dicasRem = gerarAnaliseRemProfundoIA(remProfundo);
+  const dicasConstancia = gerarAnaliseConstanciaIA(constancia);
 
   return resumoIA +
     renderPeriodSelector("analiseView") +
@@ -1110,22 +966,16 @@ function renderAnaliseSono(){
     '<div class="chart-wrap" style="height:220px;"><canvas id="chartHoras" role="img" aria-label="Gráfico de horas de sono por noite com linha de meta"></canvas></div>'+
     '<div class="chart-wrap" style="height:200px;"><canvas id="chartScore" role="img" aria-label="Gráfico de score de qualidade do sono por noite"></canvas></div>'+
 
-    '<div class="card" style="margin:24px 0;border-color:var(--purple);">'+
-      '<p style="font-size:11.5px;color:var(--purple);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin:0 0 4px;">Especialista em sono · Análise assistida por IA</p>'+
-      '<p style="font-size:12px;color:var(--text-faint);margin:0;">Período analisado: '+periodoLabel+' · '+grupos.length+' noite'+(grupos.length>1?"s":"")+' com registro</p>'+
-    '</div>'+
+    '<div class="section-title">Sono REM e sono profundo — análise assistida por IA</div>'+
+    '<p style="font-size:12px;color:var(--text-faint);margin:-6px 0 12px;">Baseado em referências de organizações de sono (Sleep Foundation, CDC, National Sleep Foundation).</p>'+
+    dicasRem.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
 
-    blocoSecoes("1. Análise completa e profunda dos dados", especialista.analise)+
-    blocoSecoes("2. Benefícios esperados (o que esperar do seu dia)", especialista.beneficios)+
-    blocoSecoes("3. Pontos de atenção e gargalos", especialista.gargalos)+
-
-    '<div class="section-title">4. Plano de melhoria e otimização</div>'+
-    '<div class="insight-row"><span style="color:var(--purple);font-weight:600;">☀️ Ação imediata (durante o dia):</span></div>'+
-    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.imediata+'</span></div>'+
-    '<div class="insight-row" style="margin-top:8px;"><span style="color:var(--purple);font-weight:600;">🌙 Protocolo de higiene do sono (noite):</span></div>'+
-    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.protocolo+'</span></div>'+
-    '<div class="insight-row" style="margin-top:8px;"><span style="color:var(--purple);font-weight:600;">🎯 Meta para a próxima noite:</span></div>'+
-    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.meta+'</span></div>';
+    '<div class="section-title">Constância do horário de sono — análise assistida por IA</div>'+
+    (constancia ? '<div class="grid grid-2" style="margin-bottom:16px;">'+
+      metricCard("Variação horário de dormir", Math.round(constancia.desvDormir)+" min") +
+      metricCard("Variação horário de acordar", Math.round(constancia.desvAcordar)+" min") +
+    '</div>' : '') +
+    dicasConstancia.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
 }
 
 function renderParametrosSono(){
@@ -1862,13 +1712,197 @@ function renderExerciciosTab(){
     ) + '</div>';
 }
 
+// ---------- Especialista em Desempenho Físico (Análise Geral) ----------
+
+function metaHidratacaoMl(pesoKg){
+  if (!pesoKg) return null;
+  // 35ml por kg de peso corporal é a referência prática mais usada
+  return Math.round(pesoKg * 35);
+}
+
+function classificarVolumeMovimento(mediaPassos){
+  if (mediaPassos === null) return null;
+  if (mediaPassos < 5000) return { nivel: "sedentário", texto: "abaixo de 5.000 passos/dia, faixa associada a comportamento sedentário" };
+  if (mediaPassos < 7500) return { nivel: "levemente ativo", texto: "entre 5.000 e 7.500 passos/dia, um nível levemente ativo" };
+  if (mediaPassos < 10000) return { nivel: "ativo", texto: "entre 7.500 e 10.000 passos/dia, um nível considerado ativo" };
+  return { nivel: "muito ativo", texto: "acima de 10.000 passos/dia, um nível muito ativo" };
+}
+
+function classificarGorduraVisceral(nivel){
+  if (nivel === null || nivel === undefined) return null;
+  if (nivel < 10) return { status: "saudável", cor: "var(--success)" };
+  if (nivel <= 14) return { status: "moderadamente elevada", cor: "var(--warning)" };
+  return { status: "elevada (fator de risco cardiometabólico)", cor: "var(--danger)" };
+}
+
+// Agrega Atividade + Movimentação no período (médias), e pega o relatório de Bioimpedância mais recente (instantâneo)
+function dadosDesempenhoNoPeriodo(start, end){
+  const startIso = isoDate(start), endIso = isoDate(end);
+  const atividades = state.exercicios.filter(e => e.data >= startIso && e.data <= endIso);
+  const movs = state.movimentacao.filter(m => m.data >= startIso && m.data <= endIso);
+  const grupos = gruposNoIntervalo(start, end).filter(g => g.horasSonoReal > 0);
+
+  const diasComMov = movs.length;
+  const mediaPassos = movs.filter(m=>m.passos).length ? avg(movs.filter(m=>m.passos).map(m=>m.passos)) : null;
+  const mediaAtivo = movs.filter(m=>m.minutosAtivo).length ? avg(movs.filter(m=>m.minutosAtivo).map(m=>m.minutosAtivo)) : null;
+  const mediaCalTotais = movs.filter(m=>m.caloriasTotais).length ? avg(movs.filter(m=>m.caloriasTotais).map(m=>m.caloriasTotais)) : null;
+  const mediaCalAtividade = movs.filter(m=>m.caloriasAtividade).length ? avg(movs.filter(m=>m.caloriasAtividade).map(m=>m.caloriasAtividade)) : null;
+  const mediaDistancia = movs.filter(m=>m.distanciaKm).length ? avg(movs.filter(m=>m.distanciaKm).map(m=>m.distanciaKm)) : null;
+
+  const diasComAtividade = new Set(atividades.map(e=>e.data)).size;
+  const tiposNoPeriodo = {};
+  atividades.forEach(e => { if (e.tipo) tiposNoPeriodo[e.tipo] = (tiposNoPeriodo[e.tipo]||0)+1; });
+  const tipoMaisFreq = Object.keys(tiposNoPeriodo).sort((a,b)=>tiposNoPeriodo[b]-tiposNoPeriodo[a])[0] || null;
+  const duracoesMin = atividades.map(e => { const dur = calcDuracaoAtividade(e.horaInicio, e.horaFim); return dur!==null ? dur*60 : null; }).filter(dur=>dur!==null);
+  const mediaDuracaoMin = duracoesMin.length ? avg(duracoesMin) : null;
+
+  const bio = bioMaisRecente();
+
+  const mediaSonoReal = grupos.length ? avg(grupos.map(g=>g.horasSonoReal)) : null;
+  const mediaScoreSono = grupos.length ? avg(grupos.map(g=>g.score)) : null;
+
+  return {
+    nDias: Math.round((endIso > startIso ? (new Date(endIso)-new Date(startIso))/86400000 : 0))+1,
+    diasComMov, diasComAtividade, tipoMaisFreq, mediaDuracaoMin,
+    mediaPassos, mediaAtivo, mediaCalTotais, mediaCalAtividade, mediaDistancia,
+    bio, mediaSonoReal, mediaScoreSono, nNoitesSono: grupos.length
+  };
+}
+
+function gerarEspecialistaDesempenhoFisico(d){
+  const secoes = { instantaneo: [], composicao: [], gargalo: [], plano: [] };
+  const bio = d.bio;
+
+  // ---- Seção 1: Instantâneo de performance e saúde do período ----
+  const volume = classificarVolumeMovimento(d.mediaPassos);
+  if (volume) {
+    secoes.instantaneo.push("Volume de movimento: sua média foi de "+Math.round(d.mediaPassos).toLocaleString("pt-BR")+" passos/dia, "+volume.texto+(d.mediaDistancia!==null?", com média de "+d.mediaDistancia.toFixed(1)+" km percorridos em atividade":"")+".");
+  } else {
+    secoes.instantaneo.push("Sem registros de passos no período para avaliar o volume de movimento diário.");
+  }
+  if (d.diasComAtividade > 0) {
+    let txt = "Você praticou atividade física específica em "+d.diasComAtividade+" de "+d.nDias+" dia(s) do período"+(d.tipoMaisFreq?", predominantemente "+d.tipoMaisFreq:"")+(d.mediaDuracaoMin!==null?", com duração média de "+Math.round(d.mediaDuracaoMin)+" minutos por sessão":"")+". Sem dados de frequência cardíaca, a intensidade real do estímulo (aeróbico, anaeróbico ou regenerativo) não pode ser confirmada — vale registrar isso no futuro para um diagnóstico mais preciso.";
+    secoes.instantaneo.push(txt);
+  } else {
+    secoes.instantaneo.push("Nenhuma atividade física específica registrada no período — o gasto calórico, se houve, foi proveniente apenas de movimentação geral do dia.");
+  }
+  if (d.mediaCalTotais !== null && bio && bio.bmrKcal) {
+    const balanco = d.mediaCalTotais - bio.bmrKcal;
+    secoes.instantaneo.push("Balanço calórico estimado: gasto total médio de "+Math.round(d.mediaCalTotais).toLocaleString("pt-BR")+" kcal/dia frente a um metabolismo basal (BMR) de "+Math.round(bio.bmrKcal).toLocaleString("pt-BR")+" kcal — um excedente de aproximadamente "+Math.round(balanco).toLocaleString("pt-BR")+" kcal/dia além do basal, vindo de atividade e movimentação (esse número não considera a alimentação, então não indica diretamente ganho ou perda de peso isoladamente).");
+  }
+
+  // ---- Seção 2: Composição corporal (Bioimpedância) ----
+  if (!bio) {
+    secoes.composicao.push("Nenhum relatório de bioimpedância registrado ainda — essa seção fica disponível após o primeiro relatório.");
+  } else {
+    if (bio.massaMuscularEsqueleticaKg && bio.pesoKg) {
+      const pctMuscular = (bio.massaMuscularEsqueleticaKg / bio.pesoKg) * 100;
+      secoes.composicao.push("Status muscular: "+bio.massaMuscularEsqueleticaKg.toFixed(1)+"kg de massa muscular esquelética para "+bio.pesoKg.toFixed(1)+"kg de peso total ("+pctMuscular.toFixed(1)+"% do peso). "+(bio.bmrKcal?"Seu metabolismo basal de "+Math.round(bio.bmrKcal)+" kcal reflete essa quantidade de massa magra — mais massa muscular eleva diretamente o quanto você queima em repouso.":""));
+    }
+    if (bio.relacaoGorduraPct !== null && bio.relacaoGorduraPct !== undefined) {
+      let statusGordura = bio.relacaoGorduraPct <= 20 ? "dentro de uma faixa saudável" : bio.relacaoGorduraPct <= 26 ? "moderadamente elevado" : "elevado, merecendo atenção";
+      const vClass = classificarGorduraVisceral(bio.gorduraVisceral);
+      secoes.composicao.push("Percentual de gordura corporal de "+bio.relacaoGorduraPct.toFixed(1)+"%, "+statusGordura+". "+(bio.gorduraVisceral!==null&&bio.gorduraVisceral!==undefined ? "A gordura visceral está em nível "+bio.gorduraVisceral+", classificada como "+(vClass?vClass.status:"—")+" — esse indicador pesa mais para risco cardiovascular e metabólico do que o percentual de gordura subcutânea isoladamente." : ""));
+    }
+    if (bio.aguaCorporalKg && bio.pesoKg) {
+      const pctAgua = (bio.aguaCorporalKg / bio.pesoKg) * 100;
+      let statusAgua = pctAgua < 50 ? "um pouco abaixo do esperado para o seu tipo de corpo, vale reforçar a ingestão hídrica especialmente em dias de treino" : "dentro de uma faixa adequada";
+      secoes.composicao.push("Hidratação corporal: "+bio.aguaCorporalKg.toFixed(1)+"kg de água corporal, equivalente a "+pctAgua.toFixed(1)+"% do peso total — "+statusAgua+".");
+    }
+  }
+
+  // ---- Seção 3: Ponto de atenção / gargalo dominante ----
+  let gargalo = null;
+  if (bio && bio.gorduraVisceral !== null && bio.gorduraVisceral !== undefined && bio.gorduraVisceral >= 10) {
+    gargalo = { tipo: "gordura_visceral", texto: "O principal ponto de atenção é a gordura visceral em nível "+bio.gorduraVisceral+" — acima do limite saudável (abaixo de 10 é o ideal). É o indicador com maior peso para risco cardiometabólico entre os dados disponíveis, e tende a responder bem à combinação de déficit calórico moderado e volume de movimento consistente." };
+  } else if (d.mediaPassos !== null && d.mediaPassos < 5000 && d.diasComAtividade > 0) {
+    gargalo = { tipo: "sedentarismo_residual", texto: "Apesar de haver treino registrado, sua movimentação de base no dia (passos) está baixa, abaixo de 5.000/dia. Treinar e passar o resto do dia sedentário ('sedentarismo mecânico') reduz parte do benefício metabólico do exercício — o ideal é aumentar o movimento espontâneo fora do treino." };
+  } else if (d.diasComAtividade === 0 && d.nDias > 1) {
+    gargalo = { tipo: "falta_atividade", texto: "Não há atividade física específica registrada no período. Isso limita o estímulo de ganho/manutenção de massa muscular e a melhora do condicionamento cardiorrespiratório." };
+  } else if (bio && bio.aguaCorporalKg && bio.pesoKg && (bio.aguaCorporalKg/bio.pesoKg)*100 < 50) {
+    gargalo = { tipo: "hidratacao", texto: "A hidratação corporal está abaixo do ideal para o seu peso e nível de atividade — isso pode comprometer recuperação muscular e desempenho em treinos mais intensos." };
+  } else if (d.mediaSonoReal !== null && state.parametros && d.mediaSonoReal < (state.parametros.metaHorasSono - 0.5)) {
+    gargalo = { tipo: "sono", texto: "O sono está "+fmtHoras(state.parametros.metaHorasSono - d.mediaSonoReal)+" abaixo da sua meta no período (média de "+fmtHoras(d.mediaSonoReal)+"). Sono insuficiente compromete diretamente a recuperação muscular e a síntese de massa magra, reduzindo o retorno do treino." };
+  } else {
+    gargalo = { tipo: "nenhum_critico", texto: "Não há um gargalo crítico evidente nos dados deste período — os indicadores disponíveis (movimento, composição corporal e sono) estão em equilíbrio razoável. O foco agora pode ser consistência, não correção." };
+  }
+  secoes.gargalo.push(gargalo.texto);
+
+  // ---- Seção 4: Plano de ação (3 recomendações fixas pelo prompt) ----
+  if (gargalo.tipo === "sedentarismo_residual" || (d.mediaPassos!==null && d.mediaPassos<7500)) {
+    secoes.plano.push({ titulo: "Ajuste de treino/movimentação", texto: "Mantenha a frequência de treino atual, mas priorize aumentar o volume de movimento fora do treino — meta prática de 7.500 a 10.000 passos/dia, distribuídos ao longo do dia (caminhadas curtas após refeições ajudam bastante)." });
+  } else if (d.diasComAtividade === 0) {
+    secoes.plano.push({ titulo: "Ajuste de treino/movimentação", texto: "Reintroduza pelo menos 2 a 3 sessões de atividade física específica nos próximos 7 dias, com duração mínima de 30 minutos, priorizando o tipo de exercício que você mais sustenta na rotina." });
+  } else {
+    secoes.plano.push({ titulo: "Ajuste de treino/movimentação", texto: "Mantenha o volume e a frequência atuais de treino — estão consistentes. Para o próximo ciclo, considere registrar a frequência cardíaca quando possível, para refinar a leitura de intensidade do estímulo." });
+  }
+  const metaMl = bio && bio.pesoKg ? metaHidratacaoMl(bio.pesoKg) : null;
+  if (metaMl) {
+    const focoMacro = (bio && bio.relacaoGorduraPct !== null && bio.relacaoGorduraPct > 22) ? "priorizando proteína (cerca de 1,8–2,2g por kg de peso/dia) para preservar massa magra durante um possível déficit calórico" : "mantendo ingestão de proteína em torno de 1,6–2,0g por kg de peso/dia para sustentar a massa muscular atual";
+    secoes.plano.push({ titulo: "Ajuste nutricional e hídrico", texto: "Meta de hidratação recomendada: aproximadamente "+metaMl.toLocaleString("pt-BR")+"ml de água por dia (35ml/kg, com base no seu peso de "+bio.pesoKg.toFixed(1)+"kg), ajustando para mais em dias de treino. Em alimentação, "+focoMacro+"." });
+  } else {
+    secoes.plano.push({ titulo: "Ajuste nutricional e hídrico", texto: "Registre um relatório de bioimpedância para que eu possa calcular sua meta de hidratação diária (em ml) e uma recomendação de proteína personalizada com base no seu peso atual." });
+  }
+  let metaAlvo;
+  if (gargalo.tipo === "gordura_visceral") metaAlvo = "Reduzir a gordura visceral para abaixo de 10 no próximo relatório de bioimpedância.";
+  else if (gargalo.tipo === "sedentarismo_residual") metaAlvo = "Elevar a média diária de passos para a faixa de 7.500–10.000 no próximo período analisado.";
+  else if (gargalo.tipo === "falta_atividade") metaAlvo = "Registrar ao menos 2 sessões de atividade física específica no próximo período analisado.";
+  else if (gargalo.tipo === "hidratacao") metaAlvo = "Atingir a meta diária de hidratação calculada (em ml) de forma consistente até o próximo relatório.";
+  else if (gargalo.tipo === "sono") metaAlvo = "Aproximar a média de sono real da meta de "+fmtHoras(state.parametros.metaHorasSono)+" antes do próximo ciclo de análise.";
+  else metaAlvo = "Manter os indicadores atuais estáveis e, se possível, começar a registrar frequência cardíaca nos treinos para enriquecer a próxima análise.";
+  secoes.plano.push({ titulo: "Métrica alvo", texto: metaAlvo });
+
+  return secoes;
+}
+
+function renderAnaliseGeralExercicios(){
+  if (!state.exerciciosAnaliseView) state.exerciciosAnaliseView = { tipo: "semana", offset: 0, dataInicio: null, dataFim: null };
+  const { start, end, label } = getPeriodoAtual("exerciciosAnaliseView");
+  const d = dadosDesempenhoNoPeriodo(start, end);
+
+  if (!d.bio && d.diasComAtividade===0 && d.diasComMov===0 && d.nNoitesSono===0) {
+    return renderPeriodSelector("exerciciosAnaliseView") + '<div class="empty-state">Sem dados suficientes no período selecionado (atividade, movimentação, sono ou bioimpedância) para gerar a análise.</div>';
+  }
+
+  const secoes = gerarEspecialistaDesempenhoFisico(d);
+  const bio = d.bio;
+  const vClass = bio ? classificarGorduraVisceral(bio.gorduraVisceral) : null;
+
+  return renderPeriodSelector("exerciciosAnaliseView") +
+
+    '<div class="grid grid-4" style="margin-bottom:24px;">'+
+      metricCard("Dias com atividade", d.diasComAtividade+"/"+d.nDias, "run") +
+      metricCard("Passos (média)", d.mediaPassos!==null?Math.round(d.mediaPassos).toLocaleString("pt-BR"):"—") +
+      metricCard("Peso atual", bio?bio.pesoKg.toFixed(1)+"kg":"—") +
+      metricCard("Gordura visceral", bio&&bio.gorduraVisceral!==null&&bio.gorduraVisceral!==undefined?bio.gorduraVisceral:"—", null, null, vClass?vClass.cor:null) +
+    '</div>'+
+
+    '<div class="section-title" style="margin-top:0;">1. Instantâneo de performance e saúde · '+label+'</div>'+
+    secoes.instantaneo.map(t=>'<div class="insight-row">'+icon("bulb")+'<span>'+t+'</span></div>').join("")+
+
+    '<div class="section-title">2. Composição corporal (bioimpedância)</div>'+
+    (bio ? (function(){
+      const diasAtras = Math.round((new Date() - new Date(bio.dataMedicao)) / 86400000);
+      const txtDias = diasAtras<=0 ? "hoje" : diasAtras===1 ? "há 1 dia" : "há "+diasAtras+" dias";
+      return '<p style="font-size:12px;color:var(--text-faint);margin:-6px 0 12px;">Seu relatório de bioimpedância mais recente é de '+new Date(bio.dataMedicao).toLocaleDateString("pt-BR")+' ('+txtDias+') — pode ser anterior ao período filtrado acima, já que a composição corporal é tratada como um instantâneo contínuo, não por período.</p>';
+    })() : '')+
+    secoes.composicao.map(t=>'<div class="insight-row">'+icon("bulb")+'<span>'+t+'</span></div>').join("")+
+
+    '<div class="section-title">3. Ponto de atenção e gargalo</div>'+
+    secoes.gargalo.map(t=>'<div class="insight-row" style="border-color:var(--warning);">'+icon("bulb")+'<span>'+t+'</span></div>').join("")+
+
+    '<div class="section-title">4. Plano de melhoria e ação</div>'+
+    secoes.plano.map(p=>'<div class="insight-row"><span style="color:var(--purple);font-weight:600;">'+icon("bulb")+'</span><span><strong style="color:var(--text);">'+p.titulo+':</strong> '+p.texto+'</span></div>').join("");
+}
+
 function renderExercicios(){
-  if (!state.exerciciosSecao) state.exerciciosSecao = "bioimpedancia";
-  const secoes = [{id:"bioimpedancia",label:"Bioimpedância"},{id:"peso",label:"Peso"},{id:"atividade",label:"Atividade física"}];
+  if (!state.exerciciosSecao) state.exerciciosSecao = "geral";
+  const secoes = [{id:"geral",label:"Análise Geral"},{id:"bioimpedancia",label:"Bioimpedância"},{id:"peso",label:"Peso"},{id:"atividade",label:"Atividade física"}];
   return backLink() +
     '<div class="page-header"><div class="page-title">Exercícios físicos</div></div>'+
     tabsHtml(secoes, state.exerciciosSecao, "exerciciosecao") +
     '<div id="exercicios-content">' + (
+      state.exerciciosSecao==="geral" ? renderAnaliseGeralExercicios() :
       state.exerciciosSecao==="bioimpedancia" ? renderBioimpedanciaTab() :
       state.exerciciosSecao==="peso" ? renderPesoTab() : renderExerciciosTab()
     ) + '</div>';
