@@ -888,6 +888,144 @@ function gerarAnaliseConstanciaIA(constancia){
   return textos;
 }
 
+function calcularEficienciaSono(grupos){
+  const comAmbos = grupos.filter(function(g){ return g.horasNaCama>0 && g.horasSonoReal>0; });
+  if (!comAmbos.length) return null;
+  const mediaTotal = avg(comAmbos.map(function(g){ return g.horasNaCama; }));
+  const mediaReal = avg(comAmbos.map(function(g){ return g.horasSonoReal; }));
+  if (!mediaTotal) return null;
+  return { pct: (mediaReal/mediaTotal)*100, mediaTotal: mediaTotal, mediaReal: mediaReal, diferenca: mediaTotal-mediaReal };
+}
+
+// ---------- Especialista em Sono: análise completa de 4 seções ----------
+// Baseado em medicina do sono, ciência de dados de saúde e coaching de alta
+// performance. Opera sobre o período filtrado (1 noite ou agregado de várias).
+
+function gerarAnaliseEspecialistaSono(grupos, remProfundo, constancia, eficiencia, mediaHorasReal, periodoLabel, nDias){
+  const secoes = {};
+  const ehUmaNoite = nDias === 1;
+
+  // ===== SEÇÃO 1: Análise completa e profunda dos dados =====
+  const s1 = [];
+  if (eficiencia !== null) {
+    const efTxt = eficiencia.pct.toFixed(1)+"%";
+    let efAvaliacao;
+    if (eficiencia.pct >= 90) efAvaliacao = "excelente — quase todo o tempo na cama foi de fato sono, com pouquíssimo tempo perdido em despertares ou para pegar no sono";
+    else if (eficiencia.pct >= 85) efAvaliacao = "boa, dentro da faixa considerada saudável";
+    else if (eficiencia.pct >= 75) efAvaliacao = "moderada — uma parcela relevante do tempo na cama não foi sono efetivo";
+    else efAvaliacao = "baixa, indicando fragmentação significativa ou dificuldade para iniciar o sono";
+    s1.push("Eficiência do sono: "+efTxt+" ("+fmtHoras(eficiencia.mediaReal)+" de sono real para cada "+fmtHoras(eficiencia.mediaTotal)+" na cama, em média"+(ehUmaNoite?"":" no período")+"). Isso é considerado "+efAvaliacao+". A diferença de "+fmtHoras(eficiencia.diferenca)+" representa tempo acordado, em transição ou de sono fragmentado não recuperado.");
+  } else {
+    s1.push("Não há dados suficientes de tempo total na cama e tempo de sono real para calcular a eficiência do sono no período.");
+  }
+
+  if (remProfundo.mediaPctRem !== null || remProfundo.mediaPctFundo !== null) {
+    const remTxt = remProfundo.mediaPctRem!==null ? remProfundo.mediaPctRem.toFixed(1)+"%" : "sem dado";
+    const fundoTxt = remProfundo.mediaPctFundo!==null ? remProfundo.mediaPctFundo.toFixed(1)+"%" : "sem dado";
+    s1.push("Arquitetura do sono: REM em "+remTxt+" e sono profundo em "+fundoTxt+" do sono real"+(ehUmaNoite?"":", em média no período")+". A referência ideal para adultos gira em torno de 20–25% para cada uma dessas fases. REM concentra-se na segunda metade da noite e está ligado à restauração cognitiva, consolidação de memória e criatividade; sono profundo concentra-se na primeira metade e está ligado à recuperação física, tecidual e hormonal."+
+      (remProfundo.statusRem==="abaixo" ? " Seu REM está abaixo dessa faixa." : remProfundo.statusRem==="acima" ? " Seu REM está acima dessa faixa." : remProfundo.statusRem==="dentro" ? " Seu REM está dentro da faixa ideal." : "")+
+      (remProfundo.statusFundo==="abaixo" ? " Seu sono profundo está abaixo dessa faixa." : remProfundo.statusFundo==="acima" ? " Seu sono profundo está acima dessa faixa." : remProfundo.statusFundo==="dentro" ? " Seu sono profundo está dentro da faixa ideal." : ""));
+  } else {
+    s1.push("Arquitetura do sono: não há dados de REM ou sono profundo registrados no período selecionado.");
+  }
+
+  if (constancia) {
+    function classificar(desv){
+      if (desv <= 20) return "muito consistente";
+      if (desv <= 45) return "razoavelmente consistente";
+      if (desv <= 75) return "inconsistente";
+      return "bastante irregular";
+    }
+    s1.push("Sincronia do ritmo circadiano: o horário de dormir variou em média "+Math.round(constancia.desvDormir)+" minutos ("+classificar(constancia.desvDormir)+") e o de acordar "+Math.round(constancia.desvAcordar)+" minutos ("+classificar(constancia.desvAcordar)+") no período. Regularidade de horário é um dos fatores mais determinantes para a sincronização do relógio biológico, frequentemente com mais impacto na qualidade percebida do sono do que o total de horas dormidas.");
+  } else {
+    s1.push("Sincronia do ritmo circadiano: dados insuficientes para avaliar a consistência de horário (é necessário registrar ao menos 3 noites com horário de dormir).");
+  }
+  secoes.analise = s1;
+
+  // ===== SEÇÃO 2: Benefícios esperados para o dia =====
+  const s2 = [];
+  const remOk = remProfundo.statusRem === "dentro" || remProfundo.statusRem === "acima";
+  const fundoOk = remProfundo.statusFundo === "dentro" || remProfundo.statusFundo === "acima";
+  const efOk = eficiencia !== null && eficiencia.pct >= 85;
+  const horasOk = mediaHorasReal !== null && mediaHorasReal >= 7;
+
+  if (remProfundo.mediaPctRem !== null) {
+    s2.push("Capacidade cognitiva e foco: "+(remOk
+      ? "com o nível de REM registrado, a expectativa é de boa clareza mental, tomada de decisão mais ágil e maior facilidade de aprendizado e retenção hoje."
+      : "com o REM abaixo do ideal, é provável sentir mais lentidão no raciocínio, dificuldade de concentração sustentada e memória de curto prazo menos afiada — vale reservar tarefas mais simples ou repetitivas para os momentos de menor energia mental."));
+  }
+  if (remProfundo.mediaPctFundo !== null) {
+    s2.push("Energia física e recuperação muscular: "+(fundoOk
+      ? "o sono profundo registrado sugere boa recuperação tecidual e hormonal — disposição física e resposta imunológica tendem a estar favorecidas hoje."
+      : "o sono profundo abaixo do ideal tende a se traduzir em menor disposição física, recuperação muscular mais lenta (relevante se houver treino hoje) e resposta imunológica um pouco mais vulnerável."));
+  }
+  const humorOk = efOk && horasOk;
+  s2.push("Regulação emocional e resiliência: "+(humorOk
+    ? "com eficiência e duração de sono favoráveis, a expectativa é de maior estabilidade emocional e melhor tolerância a contratempos e estresse ao longo do dia."
+    : "com o sono fragmentado e/ou insuficiente, é comum maior irritabilidade, menor paciência e reações emocionais mais intensas a situações de estresse — vale reconhecer esse efeito antes de decisões importantes ou conversas sensíveis."));
+  secoes.beneficios = s2;
+
+  // ===== SEÇÃO 3: Pontos de atenção e gargalos =====
+  const s3 = [];
+  const candidatos = [];
+  if (eficiencia !== null && eficiencia.pct < 85) candidatos.push({ chave: "eficiencia", gravidade: 85-eficiencia.pct });
+  if (remProfundo.statusFundo === "abaixo") candidatos.push({ chave: "profundo", gravidade: REFERENCIA_SONO.profundoMin-remProfundo.mediaPctFundo });
+  if (remProfundo.statusRem === "abaixo") candidatos.push({ chave: "rem", gravidade: REFERENCIA_SONO.remMin-remProfundo.mediaPctRem });
+  if (constancia && constancia.desvDormir > 45) candidatos.push({ chave: "constancia", gravidade: constancia.desvDormir-45 });
+  if (mediaHorasReal !== null && mediaHorasReal < state.parametros.metaHorasSono - 0.5) candidatos.push({ chave: "duracao", gravidade: (state.parametros.metaHorasSono-mediaHorasReal)*30 });
+
+  if (!candidatos.length) {
+    s3.push("Não foi identificado um gargalo dominante no período: os indicadores analisados (eficiência, REM, sono profundo, constância de horário e duração) estão em níveis saudáveis. O foco agora é manter a rotina atual.");
+  } else {
+    candidatos.sort(function(a,b){ return b.gravidade-a.gravidade; });
+    const principal = candidatos[0].chave;
+    const textosGargalo = {
+      eficiencia: "O principal gargalo é a baixa eficiência do sono — uma parte relevante do tempo na cama não é sono efetivo. As causas mais comuns são: tempo elevado para pegar no sono (alta latência), despertares noturnos frequentes, uso de celular/telas na cama, ou ambiente de sono inadequado (luz, ruído, temperatura).",
+      profundo: "O principal gargalo é o sono profundo abaixo da faixa recomendada. Causas fisiológicas e de rotina comuns: consumo de álcool (que reduz especificamente essa fase), cafeína à tarde/noite, jantar tardio ou pesado, estresse elevado antes de dormir, e ambiente de sono muito iluminado ou quente.",
+      rem: "O principal gargalo é o sono REM abaixo da faixa recomendada. Isso costuma estar associado a duração total de sono insuficiente (REM se concentra no fim da noite e é \"cortado\" quando o sono é encurtado), uso de álcool, ou despertar com alarme no meio de um ciclo de sono.",
+      constancia: "O principal gargalo é a inconsistência do horário de dormir. Horários muito variáveis (incluindo diferenças grandes entre dias de semana e fim de semana) dificultam a sincronização do ritmo circadiano, mesmo quando o total de horas dormidas é adequado.",
+      duracao: "O principal gargalo é a privação crônica leve de sono — a média de horas dormidas está consistentemente abaixo da sua meta. Isso tem efeito cumulativo: o débito de sono se acumula dia após dia e não é compensado totalmente por uma única noite de sono mais longo."
+    };
+    s3.push(textosGargalo[principal]);
+  }
+  secoes.gargalos = s3;
+
+  // ===== SEÇÃO 4: Plano de ação =====
+  const s4 = {};
+  const principal = candidatos.length ? candidatos[0].chave : null;
+
+  const acoesImediatas = {
+    eficiencia: "Busque exposição à luz solar direta nos primeiros 30-60 minutos após acordar — isso ajuda a ancorar o ritmo circadiano e reduz a dificuldade de iniciar o sono na noite seguinte. Evite cafeína após as 15h.",
+    profundo: "Pratique atividade física (mesmo moderada) durante o dia, de preferência não nas 2-3h antes de dormir. Evite álcool esta noite — ele é um dos fatores com maior impacto negativo isolado sobre o sono profundo.",
+    rem: "Evite privação adicional de sono hoje (nada de cortar ainda mais as horas de sono à noite). Se possível, evite álcool, que suprime REM de forma significativa.",
+    constancia: "Mantenha suas atividades e refeições em horários regulares hoje, criando consistência também durante o dia, não só à noite.",
+    duracao: "Avalie se é possível antecipar 30 minutos o horário de ir para a cama hoje, mesmo que pareça pouco — o efeito é cumulativo.",
+    default: "Busque luz solar pela manhã e modere a cafeína após o início da tarde, hábitos que sustentam a qualidade do sono ao longo do tempo."
+  };
+  const protocolosNoite = {
+    eficiencia: "Reduza o uso de telas na última hora antes de dormir e mantenha o quarto escuro, silencioso e com temperatura entre 18-21°C. Se a latência para dormir for alta, considere uma rotina de desaceleração de 20-30 min antes de deitar (leitura física, respiração, alongamento leve).",
+    profundo: "Jante mais leve e com antecedência de pelo menos 2-3h antes de dormir. Mantenha o quarto mais frio (a queda de temperatura corporal favorece sono profundo) e escuro.",
+    rem: "Tente manter um horário de despertar mais consistente, evitando alarmes muito antecipados em relação ao seu ciclo natural. Evite álcool antes de dormir.",
+    constancia: "Defina um horário-alvo fixo para ir para a cama esta noite, o mais próximo possível da sua média habitual, mesmo nos dias de menor compromisso no dia seguinte.",
+    duracao: "Proteja o horário de dormir hoje como uma prioridade não negociável, indo para a cama no horário-alvo mesmo que ainda não esteja com sono — a rotina ajuda o corpo a antecipar o sono.",
+    default: "Mantenha o quarto escuro, silencioso e fresco, e reduza estímulos de tela na última hora antes de dormir."
+  };
+  const metasMetricas = {
+    eficiencia: "Aumentar a eficiência do sono para acima de 85% na próxima noite, reduzindo o tempo acordado na cama.",
+    profundo: "Elevar o percentual de sono profundo para dentro da faixa de "+REFERENCIA_SONO.profundoMin+"–"+REFERENCIA_SONO.profundoMax+"% na próxima noite.",
+    rem: "Elevar o percentual de sono REM para dentro da faixa de "+REFERENCIA_SONO.remMin+"–"+REFERENCIA_SONO.remMax+"% na próxima noite.",
+    constancia: "Reduzir a variação do horário de dormir para menos de 30 minutos em relação à média, na próxima noite.",
+    duracao: "Aproximar a duração do sono real da meta de "+fmtHoras(state.parametros.metaHorasSono)+" na próxima noite.",
+    default: "Manter a duração e a consistência atuais, que já estão em níveis saudáveis."
+  };
+  s4.imediata = acoesImediatas[principal] || acoesImediatas.default;
+  s4.protocolo = protocolosNoite[principal] || protocolosNoite.default;
+  s4.meta = metasMetricas[principal] || metasMetricas.default;
+  secoes.plano = s4;
+
+  return secoes;
+}
+
 function gerarResumoSemanaCorrenteIA(){
   const { start, end } = getSemanaCorrente();
   const grupos = gruposNoIntervalo(start, end);
@@ -950,9 +1088,15 @@ function renderAnaliseSono(){
   const scoreMedia = avg(grupos.map(g=>g.score));
   const remProfundo = analisarRemProfundo(grupos);
   const constancia = analisarConstancia(grupos);
+  const eficiencia = calcularEficienciaSono(grupos);
+  const { label: periodoLabel } = getPeriodoAtual("analiseView");
 
-  const dicasRem = gerarAnaliseRemProfundoIA(remProfundo);
-  const dicasConstancia = gerarAnaliseConstanciaIA(constancia);
+  const especialista = gerarAnaliseEspecialistaSono(grupos, remProfundo, constancia, eficiencia, media, periodoLabel, grupos.length);
+
+  function blocoSecoes(titulo, lista){
+    return '<div class="section-title">'+titulo+'</div>'+
+      lista.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
+  }
 
   return resumoIA +
     renderPeriodSelector("analiseView") +
@@ -966,16 +1110,22 @@ function renderAnaliseSono(){
     '<div class="chart-wrap" style="height:220px;"><canvas id="chartHoras" role="img" aria-label="Gráfico de horas de sono por noite com linha de meta"></canvas></div>'+
     '<div class="chart-wrap" style="height:200px;"><canvas id="chartScore" role="img" aria-label="Gráfico de score de qualidade do sono por noite"></canvas></div>'+
 
-    '<div class="section-title">Sono REM e sono profundo — análise assistida por IA</div>'+
-    '<p style="font-size:12px;color:var(--text-faint);margin:-6px 0 12px;">Baseado em referências de organizações de sono (Sleep Foundation, CDC, National Sleep Foundation).</p>'+
-    dicasRem.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
+    '<div class="card" style="margin:24px 0;border-color:var(--purple);">'+
+      '<p style="font-size:11.5px;color:var(--purple);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin:0 0 4px;">Especialista em sono · Análise assistida por IA</p>'+
+      '<p style="font-size:12px;color:var(--text-faint);margin:0;">Período analisado: '+periodoLabel+' · '+grupos.length+' noite'+(grupos.length>1?"s":"")+' com registro</p>'+
+    '</div>'+
 
-    '<div class="section-title">Constância do horário de sono — análise assistida por IA</div>'+
-    (constancia ? '<div class="grid grid-2" style="margin-bottom:16px;">'+
-      metricCard("Variação horário de dormir", Math.round(constancia.desvDormir)+" min") +
-      metricCard("Variação horário de acordar", Math.round(constancia.desvAcordar)+" min") +
-    '</div>' : '') +
-    dicasConstancia.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
+    blocoSecoes("1. Análise completa e profunda dos dados", especialista.analise)+
+    blocoSecoes("2. Benefícios esperados (o que esperar do seu dia)", especialista.beneficios)+
+    blocoSecoes("3. Pontos de atenção e gargalos", especialista.gargalos)+
+
+    '<div class="section-title">4. Plano de melhoria e otimização</div>'+
+    '<div class="insight-row"><span style="color:var(--purple);font-weight:600;">☀️ Ação imediata (durante o dia):</span></div>'+
+    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.imediata+'</span></div>'+
+    '<div class="insight-row" style="margin-top:8px;"><span style="color:var(--purple);font-weight:600;">🌙 Protocolo de higiene do sono (noite):</span></div>'+
+    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.protocolo+'</span></div>'+
+    '<div class="insight-row" style="margin-top:8px;"><span style="color:var(--purple);font-weight:600;">🎯 Meta para a próxima noite:</span></div>'+
+    '<div class="insight-row">'+icon("bulb")+'<span>'+especialista.plano.meta+'</span></div>';
 }
 
 function renderParametrosSono(){
