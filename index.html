@@ -247,10 +247,29 @@ input, select, textarea{ font-family: var(--font-body); }
 .chart-wrap{ position: relative; margin: 18px 0; }
 .empty-state{ font-size: 13.5px; color: var(--text-dim); padding: 32px 0; text-align: center; }
 
-.legend-row{ display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-dim); margin: -6px 0 18px; }
-.legend-row span{ display: flex; align-items: center; gap: 6px; }
-.legend-row i{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-</style>
+/* ── Dia Atual ─────────────────────────────────────── */
+.dia-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.dia-card{
+  background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 16px; display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.dia-card:hover:not(.is-disabled){ border-color: var(--border-strong); transform: translateY(-1px); }
+.dia-card.is-disabled{ cursor: default; }
+.dia-card-header{ display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
+.dia-card-header svg{ width: 14px; height: 14px; flex-shrink: 0; }
+.dia-card-value{ font-family: var(--font-display); font-size: 26px; font-weight: 600; line-height: 1.1; }
+.dia-card-unit{ font-size: 13px; font-weight: 400; color: var(--text-dim); }
+.dia-card-sub{ font-size: 11.5px; color: var(--text-dim); }
+.dia-card-badge{ font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 6px; align-self: flex-start; font-family: var(--font-mono); }
+.dia-card-vazio{ opacity: 0.6; }
+.dia-card-missing{ font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+@media (max-width: 900px){ .dia-grid{ grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Análise IA ─────────────────────────────────────── */
+.ia-msg-user{ align-self: flex-end; background: var(--purple-dim); border: 1px solid var(--purple); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; max-width: 80%; }
+.ia-msg-assistente{ align-self: flex-start; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; max-width: 90%; line-height: 1.6; white-space: pre-wrap; }
+
 </head>
 <body>
 <div class="scrim" id="scrim"></div>
