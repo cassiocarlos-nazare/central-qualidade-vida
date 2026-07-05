@@ -1,5 +1,7 @@
 const ICONS = {
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
   food: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8h1a4 4 0 010 8h-1"/><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><path d="M6 1v3M10 1v3M14 1v3"/></svg>',
   news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>',
   pulse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-7 4 14 3-9 2 4h4"/></svg>',
@@ -24,7 +26,7 @@ const ICONS = {
 
 const MODULES = [
   // ── Topo ──────────────────────────────────────────────
-  { id: "diaAtual",  label: "Dia Atual",         icon: "sun",       active: true,  section: "top" },
+  { id: "diaAtual",  label: "Central IA",         icon: "chat",      active: true,  section: "top" },
   { id: "dashboard", label: "Dashboard",          icon: "analytics", active: true,  section: "top" },
   { id: "analiseIA", label: "Análise IA",         icon: "bulb",      active: true,  section: "top" },
   // ── Módulos ───────────────────────────────────────────
@@ -596,108 +598,264 @@ function pulseRing(score){
 }
 
 // ══════════════════════════════════════════════════════════
-// DIA ATUAL — Coração do sistema
+// CENTRAL IA — Chat multidisciplinar (tela principal)
 // ══════════════════════════════════════════════════════════
-function renderDiaAtual(){
+
+function gerarSystemPromptCentralIA(){
   const hoje = new Date().toISOString().slice(0,10);
   const ontem = new Date(Date.now()-86400000).toISOString().slice(0,10);
+  const bio = (typeof bioMaisRecente === "function") ? bioMaisRecente() : null;
+  const sonoOntem = state.registrosSono.filter(function(r){ return r.grupoData===ontem; });
+  const movOntem = state.movimentacao ? state.movimentacao.find(function(r){ return r.data===ontem; }) : null;
+  const habitosHoje = state.habitos ? state.habitos.filter(function(h){ return h.ativo && (typeof habitoAplicavelNoDia === "function") && habitoAplicavelNoDia(h,hoje); }) : [];
+  const livrosLendo = state.livros ? state.livros.filter(function(l){ return l.status==="lendo"; }) : [];
+
+  return `Você é a Central IA — equipe multidisciplinar integrada e unificada da Central de Qualidade de Vida de Cássio Nazaré. Você representa um time completo de especialistas que trabalham juntos e se comunicam como uma equipe coesa, não como profissionais separados.
+
+EQUIPE (responda sempre como a voz unificada da equipe, mas assine com o especialista mais relevante para o contexto):
+
+ÁREA: EXERCÍCIOS E ALIMENTAÇÃO
+- Prof. Eduardo (Personal Trainer): prescrição e adaptação de treino de força, cardiorrespiratório e mobilidade; execução correta dos movimentos
+- Dra. Marina (Nutricionista Esportiva): dieta para aporte adequado de proteínas e micronutrientes, otimizando ganho de massa e recuperação
+- Dr. Felipe (Nutrólogo): adaptação metabólica, prevenção de gordura visceral, controle de colesterol, glicose e inflamação
+- Dr. Carlos (Fisioterapeuta): prevenção e reabilitação de dores crônicas, estabilização e correção postural
+- Dra. Ana (Psicóloga): construção de hábitos sustentáveis, manejo de ansiedade, adesão à rotina, suporte emocional, estresse crônico
+
+ÁREA: SONO
+- Dr. Ricardo (Médico do Sono / Neurologista): diagnóstico de distúrbios respiratórios e neurológicos, polissonografia, apneia, síndrome das pernas inquietas
+- Dra. Camila (Psicóloga Especialista em Sono): TCC-I (terapia cognitivo-comportamental para insônia), hábitos, crenças e ansiedades ligadas ao sono
+- Dr. Bruno (Odontologista do Sono): aparelhos intraorais para ronco, apneia leve a moderada, bruxismo
+- Dr. Pedro (Otorrinolaringologista): obstruções nas vias aéreas superiores, desvio de septo, amígdalas
+
+ÁREA: LEITURAS E APRENDIZAGEM
+- Dra. Letícia (Neuropsicóloga): mapeamento cognitivo, atenção, memória, TDAH, dislexia
+- Prof. Roberto (Psicopedagogo): estratégias de aprendizagem para adultos, ritmo e necessidades práticas
+- Dra. Juliana (Fonoaudióloga): processamento auditivo, fluência, compreensão leitora
+- Dr. Marcos (Neurologista Clínico): saúde cerebral global, laudos e prescrições
+- Prof. André (Especialista em Leitura): técnicas, retenção de conteúdo, análise de livros
+
+ÁREA: SAÚDE GERAL E CONSULTIVO
+- Dra. Beatriz (Médica de Família): acompanhamento clínico geral, orientações preventivas, leitura de exames, encaminhamentos e aconselhamento consultivo (não definitivo — é uma orientação, não substituição de consulta presencial)
+
+ÁREA: COMUNICAÇÃO E ORATÓRIA
+- Prof. Renato (Especialista em Oratória e Comunicação): análise de clareza, objetividade, presença e persuasão nas comunicações do Cássio — seja em textos, falas, apresentações ou situações profissionais; dicas práticas para melhorar a expressão oral e escrita
+
+ÁREA: DADOS E TECNOLOGIA
+- Eng. Diego (Engenheiro de Dados): análise e interpretação de dados do sistema, planilhas, fórmulas, leitura e armazenamento de informações gerais; auxílio com Excel, Google Sheets, estruturação de dados e automações simples
+
+ÁREA: HÁBITOS E ALTA PERFORMANCE
+- Dr. Thiago (Especialista em Hábitos e Rotinas de Alta Performance): design de rotinas saudáveis e produtivas, técnicas de habit stacking, gestão de energia ao longo do dia, prevenção de procrastinação e construção de sistemas de alta performance sustentáveis
+
+ÁREA: INTELIGÊNCIA EMOCIONAL
+- Dra. Sofia (Especialista em Inteligência Emocional): autoconhecimento, regulação emocional, empatia, gestão de conflitos, liderança emocional e desenvolvimento de relacionamentos interpessoais — base para o Cássio como pai, gestor, parceiro e anfitrião
+
+ÁREA: SECRETARIADO E ORGANIZAÇÃO
+- Carol (Secretária Executiva): organiza a agenda, gerencia tarefas e afazeres do dia a dia, registra lembretes e notas (de listas de compras a reuniões importantes), ajuda a priorizar e não deixar nada escapar — a mão direita do Cássio para tudo que é operacional e organizacional
+
+PERFIL DO CÁSSIO:
+- 42 anos, 1,75m, Pindamonhangaba-SP
+- Propósitos: Espiritualidade · Ser Família · Ser Saudável · Pai Brilhante · Gestor de Alta Performance · Anfitrião
+- Rotina semanal: acorda 5h40, musculação seg-sex 6h20-7h40 em jejum, café 7h50-8h30
+  Mix de frutas 10h-10h30, almoço 12h30-13h30, lanche 16h30-17h20, jantar 18h40-20h, dormir 21h30-22h10
+  Segunda noite: futebol society 19h20-21h · Qua ou Qui: natação 17h-18h30 (50min efetivos) · Sábado: futebol de campo
+
+DADOS ATUAIS DO SISTEMA (${hoje}):
+${bio ? `- Bioimpedância (${bio.dataMedicao ? bio.dataMedicao.slice(0,10) : "?"}): ${bio.pesoKg}kg · gordura ${bio.relacaoGorduraPct}% · músculo ${bio.massaMuscularEsqueleticaKg}kg · visceral nível ${bio.gorduraVisceral} · BMR ${bio.bmrKcal}kcal` : "- Sem bioimpedância cadastrada"}
+${sonoOntem.length ? `- Sono de ontem: ${sonoOntem.map(function(r){return (r.horasSonoReal||0).toFixed(1)+"h real, score "+(r.scoreOriginal||"?");}).join(" + ")}` : "- Sem dados de sono de ontem"}
+${movOntem ? `- Movimentação de ontem: ${movOntem.passos||0} passos · ${(movOntem.distanciaKm||0).toFixed(1)}km · ${movOntem.caloriasTotais||0}kcal totais` : "- Sem movimentação de ontem"}
+${habitosHoje.length ? `- Hábitos configurados pra hoje: ${habitosHoje.map(function(h){return h.nome;}).join(", ")}` : "- Sem hábitos configurados para hoje"}
+${livrosLendo.length ? `- Livros em leitura: ${livrosLendo.map(function(l){return l.titulo+(l.autor?" ("+l.autor+")":"");}).join(", ")}` : ""}
+
+SUA MISSÃO:
+Receba mensagens livres do Cássio (texto, prints, imagens de refeições, dados de sono). Interprete, extraia dados, e SEMPRE responda em JSON com este formato exato:
+
+{
+  "especialista": "Nome do especialista mais relevante para o contexto (ex: 'Dra. Marina · Nutricionista Esportiva')",
+  "resposta": "Resposta direta, calorosa e profissional. Fale como uma equipe experiente e parceira do Cássio, não como robô. Máximo 3 parágrafos. Use o nome do especialista que assina.",
+  "perguntas": ["Pergunta se precisar de mais informação para registrar algo"],
+  "registros": [
+    {
+      "modulo": "sono",
+      "acao": "inserir",
+      "dados": { "grupoData": "YYYY-MM-DD", "tipo": "noite", "dormiu": "HH:MM", "acordou": "HH:MM", "horasNaCama": 8.25, "horasSonoReal": 7.5, "horasRem": 1.2, "horasFundo": 0.8, "scoreOriginal": 85, "notas": "" },
+      "resumo": "Sono 02/07: 8h15 total · 7h30 real · score 85"
+    },
+    {
+      "modulo": "celular",
+      "acao": "inserir",
+      "dados": { "data": "YYYY-MM-DD", "horasConsumo": 2.5, "horasMaps": 0, "notas": "" },
+      "resumo": "Celular 02/07: 2h30 de consumo"
+    },
+    {
+      "modulo": "movimentacao",
+      "acao": "inserir",
+      "dados": { "data": "YYYY-MM-DD", "passos": 8500, "minutosAtivo": 45, "caloriasTotais": 2400, "caloriasAtividade": 400, "distanciaKm": 6.2 },
+      "resumo": "Movimentação 02/07: 8.500 passos"
+    },
+    {
+      "modulo": "diario",
+      "acao": "inserir",
+      "dados": { "data": "YYYY-MM-DD", "titulo": "Título do momento", "anotacao": "Texto completo da anotação" },
+      "resumo": "Diário: Título do momento"
+    },
+    {
+      "modulo": "alimentacao",
+      "acao": "inserir",
+      "dados": {
+        "data": "YYYY-MM-DD", "refeicao": "Café da manhã", "horario": "08:00",
+        "itens": [
+          { "item": "Café com leite desnatado", "quantidade": "200ml", "calorias": 60, "proteinas": 4, "carbs": 6, "gorduras": 1.5 },
+          { "item": "Pão integral Panco", "quantidade": "2 fatias", "calorias": 140, "proteinas": 5, "carbs": 26, "gorduras": 2 }
+        ],
+        "totais": { "calorias": 200, "proteinas": 9, "carbs": 32, "gorduras": 3.5 }
+      },
+      "resumo": "Café da manhã: 200kcal · 9g prot · 32g carb · 3,5g gord"
+    }
+  ]
+}
+
+REGRAS:
+- Assine sempre com o especialista mais relevante para o contexto da mensagem
+- Se a mensagem mistura temas (sono + alimentação), a equipe responde integrada e assina com "Equipe Central IA"
+- Prints de sono: extraia horários, total, real, score com atenção — pergunte se algo não estiver claro na imagem
+- Alimentos: use tabelas brasileiras de composição nutricional; para produtos com marca mencione a marca no cálculo
+- Não crie registros com dados incompletos — use "perguntas" para buscar o que falta
+- Hoje é ${hoje}. Ontem é ${ontem}
+- Responda SOMENTE o JSON válido. Sem texto fora do JSON, sem markdown, sem blocos de código`;
+}
+
+function renderDiaAtual(){
+  const hoje = new Date().toISOString().slice(0,10);
   const diaSemana = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][new Date().getDay()];
-  const dataFormatada = new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"});
+  const dataFmt = new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long"});
 
-  // ── DADOS DE ONTEM ──
-  // Sono
-  const sonoOntem = state.registrosSono.filter(r=>r.grupoData===ontem);
-  const sonoCard = sonoOntem.length ? (function(){
-    const principal = sonoOntem.reduce((a,b)=>(a.horasSonoReal||0)>(b.horasSonoReal||0)?a:b);
-    const score = scoreNoite(principal);
-    const cat = categoriaPorScore(score);
-    return '<div class="dia-card" data-nav="sono">'+
-      '<div class="dia-card-header">'+icon("moon")+'<span>Sono de ontem</span></div>'+
-      '<div class="dia-card-value">'+fmtHoras(principal.horasSonoReal||0)+'<span class="dia-card-unit"> real</span></div>'+
-      '<div class="dia-card-sub">Total: '+fmtHoras(principal.horasSonoTotal||0)+
-        (principal.horasRem?' · REM '+fmtHoras(principal.horasRem):'')+'</div>'+
-      (cat?'<div class="dia-card-badge" style="background:'+cat.color+'22;color:'+cat.color+'">'+score+' · '+cat.label+'</div>':'')+
-    '</div>';
-  })() : '<div class="dia-card dia-card-vazio" data-nav="sono">'+icon("moon")+'<span>Sono de ontem</span><div class="dia-card-missing">Sem registro</div></div>';
+  const msgs = state.chatCentralIA || [];
 
-  // Celular
-  const celularOntem = state.celularDiario.find(r=>r.data===ontem);
-  const celularCard = celularOntem ? (function(){
-    const horas = celularHorasNet ? celularHorasNet(celularOntem) : (celularOntem.horasConsumo||0);
-    const meta = state.parametros.metaCelularHoras||2;
-    const ok = horas<=meta;
-    return '<div class="dia-card" data-nav="celular">'+
-      '<div class="dia-card-header">'+icon("phone")+'<span>Celular de ontem</span></div>'+
-      '<div class="dia-card-value" style="color:'+(ok?"var(--success)":"var(--danger)")+'">'+fmtHoras(horas)+'</div>'+
-      '<div class="dia-card-sub">Meta: '+fmtHoras(meta)+' · '+(ok?'✓ dentro da meta':'⚠ acima da meta')+'</div>'+
-    '</div>';
-  })() : '<div class="dia-card dia-card-vazio" data-nav="celular">'+icon("phone")+'<span>Celular de ontem</span><div class="dia-card-missing">Sem registro</div></div>';
+  const msgsHTML = msgs.length === 0
+    ? '<div class="chat-empty"><div class="chat-empty-icon">'+icon("chat")+'</div>'+
+        '<div class="chat-empty-title">Central IA</div>'+
+        '<div class="chat-empty-sub">Fale livremente com sua equipe. Envie dados de sono, refeições, eventos do dia, prints — a equipe interpreta e registra tudo nos módulos certos.</div>'+
+        '<div class="chat-empty-examples">'+
+          '<div class="chat-example" data-exemplo="Bom dia! Sono: dormi 23:45 acordei 06:30, score 82. Café da manhã: 2 ovos mexidos, 1 fatia pão integral, café preto.">💬 Registrar sono e café da manhã</div>'+
+          '<div class="chat-example" data-exemplo="Ontem não fiz atividade física. Almoço: arroz integral 4 colheres, feijão 1 concha, frango grelhado 150g, salada.">🍽️ Registrar refeição e atividade</div>'+
+          '<div class="chat-example" data-exemplo="Acabei de chegar do treino: musculação 1h10min + 8.200 passos hoje.">🏋️ Registrar treino</div>'+
+        '</div>'+
+      '</div>'
+    : msgs.map(function(m){
+        if (m.role === "user") {
+          return '<div class="chat-msg chat-msg-user">'+
+            '<div class="chat-msg-bubble chat-msg-bubble-user">'+
+              (m.imagem ? '<img src="'+m.imagem+'" style="max-width:100%;border-radius:8px;margin-bottom:8px;" /><br>' : '')+
+              m.texto+
+            '</div>'+
+            '<div class="chat-msg-meta">Você · '+m.hora+'</div>'+
+          '</div>';
+        }
+        if (m.role === "assistant") {
+          const especialistaNome = m.especialista || "Equipe Central IA";
+          let html = '<div class="chat-msg chat-msg-ia">'+
+            '<div class="chat-msg-avatar" title="'+especialistaNome+'">'+icon("chat")+'</div>'+
+            '<div style="flex:1;min-width:0;">'+
+            '<div class="chat-msg-especialista">'+especialistaNome+'</div>'+
+            '<div class="chat-msg-bubble chat-msg-bubble-ia">'+m.resposta+'</div>';
+          if (m.perguntas && m.perguntas.length) {
+            html += '<div class="chat-perguntas">'+
+              m.perguntas.map(function(p){ return '<div class="chat-pergunta">❓ '+p+'</div>'; }).join("")+
+            '</div>';
+          }
+          if (m.registros && m.registros.length && !m.confirmado) {
+            html += '<div class="chat-painel-confirmacao" data-msgidx="'+m.idx+'">'+
+              '<div class="chat-painel-title">'+icon("check")+' Vou registrar:</div>'+
+              m.registros.map(function(r){
+                return '<div class="chat-registro-item">'+
+                  '<span class="chat-registro-modulo">'+r.modulo+'</span>'+
+                  '<span class="chat-registro-resumo">'+r.resumo+'</span>'+
+                '</div>';
+              }).join("")+
+              '<button class="btn btn-primary chat-btn-confirmar" data-msgidx="'+m.idx+'">Confirmar e registrar tudo</button>'+
+              '<button class="btn btn-ghost chat-btn-ignorar" data-msgidx="'+m.idx+'">Ignorar</button>'+
+            '</div>';
+          }
+          if (m.confirmado) {
+            html += '<div class="chat-confirmado">✅ Registrado nos módulos</div>';
+          }
+          if (m.ignorado) {
+            html += '<div class="chat-confirmado" style="color:var(--text-faint);">Ignorado</div>';
+          }
+          html += '</div></div>';
+          return html;
+        }
+        if (m.role === "loading") {
+          return '<div class="chat-msg chat-msg-ia">'+
+            '<div class="chat-msg-avatar">'+icon("chat")+'</div>'+
+            '<div class="chat-msg-bubble-ia chat-loading"><span></span><span></span><span></span></div>'+
+          '</div>';
+        }
+        return '';
+      }).join("");
 
-  // Movimentação
-  const movOntem = state.movimentacao ? state.movimentacao.find(r=>r.data===ontem) : null;
-  const movCard = movOntem ? (function(){
-    return '<div class="dia-card" data-nav="exercicios">'+
-      '<div class="dia-card-header">'+icon("run")+'<span>Movimento de ontem</span></div>'+
-      '<div class="dia-card-value">'+(movOntem.passos||0).toLocaleString("pt-BR")+'<span class="dia-card-unit"> passos</span></div>'+
-      '<div class="dia-card-sub">'+(movOntem.distanciaKm?movOntem.distanciaKm.toFixed(1)+' km · ':'')+
-        (movOntem.caloriasTotais?movOntem.caloriasTotais.toLocaleString("pt-BR")+' kcal':'')+'</div>'+
-    '</div>';
-  })() : '<div class="dia-card dia-card-vazio" data-nav="exercicios">'+icon("run")+'<span>Movimento de ontem</span><div class="dia-card-missing">Dados do relógio</div></div>';
-
-  // Hábitos de ontem
-  const habitosOntem = (function(){
-    if (!state.habitos || !state.habitos.length) return null;
-    const aplicaveis = state.habitos.filter(h=>h.ativo && h.controlaMeta!==false && habitoAplicavelNoDia(h, ontem));
-    if (!aplicaveis.length) return null;
-    const cumpridos = aplicaveis.filter(h=>registroHabitoNoDia(h.id, ontem));
-    return { total: aplicaveis.length, cumpridos: cumpridos.length };
+  // ── Coluna direita: hábitos de hoje ──
+  const habitosPainel = (function(){
+    if (!state.habitos || !state.habitos.length) return '<div class="habitos-painel-empty">Nenhum hábito configurado.<br><small>Configure em Rotina e Hábitos.</small></div>';
+    const aplicaveis = state.habitos.filter(function(h){ return h.ativo && (typeof habitoAplicavelNoDia === "function") && habitoAplicavelNoDia(h,hoje); });
+    if (!aplicaveis.length) return '<div class="habitos-painel-empty">Nenhum hábito para hoje.</div>';
+    return aplicaveis.map(function(h){
+      const reg = (typeof registroHabitoNoDia === "function") ? registroHabitoNoDia(h.id, hoje) : null;
+      const feito = !!reg;
+      return '<div class="habito-painel-item '+(feito?"habito-feito":"habito-pendente")+'" data-habitoid="'+h.id+'">'+
+        '<span class="habito-check">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'+
+          (feito ? '<path d="M5 13l4 4L19 7"/>' : '<circle cx="12" cy="12" r="9"/>') +'</svg>'+
+        '</span>'+
+        '<span class="habito-nome">'+h.nome+'</span>'+
+      '</div>';
+    }).join("");
   })();
-  const habitosCard = habitosOntem ?
-    '<div class="dia-card" data-nav="habitos">'+
-      '<div class="dia-card-header">'+icon("checklist")+'<span>Hábitos de ontem</span></div>'+
-      '<div class="dia-card-value">'+habitosOntem.cumpridos+'/'+habitosOntem.total+'</div>'+
-      '<div class="dia-card-sub">'+Math.round(habitosOntem.cumpridos/habitosOntem.total*100)+'% concluídos</div>'+
-    '</div>' :
-    '<div class="dia-card dia-card-vazio" data-nav="habitos">'+icon("checklist")+'<span>Hábitos de ontem</span><div class="dia-card-missing">Sem hábitos configurados</div></div>';
 
-  // ── DADOS DE HOJE ──
-  // Momentos de hoje
-  const momentosHoje = state.momentos ? state.momentos.filter(m=>m.data===hoje) : [];
-  const momentosCard = '<div class="dia-card" data-nav="momentos">'+
-    '<div class="dia-card-header">'+icon("photo")+'<span>Momentos de hoje</span></div>'+
-    '<div class="dia-card-value">'+momentosHoje.length+'</div>'+
-    '<div class="dia-card-sub">'+(momentosHoje.length?"registrado"+(momentosHoje.length>1?"s":"")+" hoje":"nenhum ainda — registre algo!")+'</div>'+
-  '</div>';
+  const cumpridos = state.habitos ? state.habitos.filter(function(h){
+    if (!h.ativo || !(typeof habitoAplicavelNoDia === "function") || !habitoAplicavelNoDia(h,hoje)) return false;
+    return !!(typeof registroHabitoNoDia === "function") && registroHabitoNoDia(h.id, hoje);
+  }).length : 0;
+  const totalHoje = state.habitos ? state.habitos.filter(function(h){ return h.ativo && (typeof habitoAplicavelNoDia === "function") && habitoAplicavelNoDia(h,hoje); }).length : 0;
 
-  // Leituras em andamento
-  const livrosLendo = state.livros ? state.livros.filter(l=>l.status==="lendo") : [];
-  const leiturasCard = livrosLendo.length ?
-    '<div class="dia-card" data-nav="leituras">'+
-      '<div class="dia-card-header">'+icon("book")+'<span>Leituras</span></div>'+
-      '<div class="dia-card-value">'+livrosLendo.length+'</div>'+
-      '<div class="dia-card-sub">livro'+(livrosLendo.length>1?"s":"")+" em andamento: "+livrosLendo.map(l=>l.titulo).join(", ").slice(0,60)+'</div>'+
-    '</div>' :
-    '<div class="dia-card dia-card-vazio" data-nav="leituras">'+icon("book")+'<span>Leituras</span><div class="dia-card-missing">Nenhum livro em andamento</div></div>';
+  return '<div class="chat-layout">'+
+    // Coluna principal: chat
+    '<div class="chat-main">'+
+      '<div class="chat-shell">'+
+        '<div class="chat-header">'+
+          '<div>'+
+            '<div class="chat-header-title">Central IA</div>'+
+            '<div class="chat-header-sub">'+diaSemana+', '+dataFmt+' · equipe multidisciplinar</div>'+
+          '</div>'+
+          '<button class="btn btn-ghost" id="btn-chat-limpar" style="font-size:12px;opacity:0.5;">Limpar conversa</button>'+
+        '</div>'+
+        '<div class="chat-msgs" id="chat-msgs">'+msgsHTML+'</div>'+
+        '<div class="chat-input-area">'+
+          '<div class="chat-input-extras" id="chat-input-extras"></div>'+
+          '<div class="chat-input-row">'+
+            '<label class="chat-btn-anexo" title="Anexar imagem (print de sono, refeição, etc.)">'+
+              icon("photo")+
+              '<input type="file" id="chat-file-input" accept="image/*" style="display:none;">'+
+            '</label>'+
+            '<textarea class="chat-textarea" id="chat-input" placeholder="Fale com sua equipe... sono, refeições, treino, momentos do dia" rows="1"></textarea>'+
+            '<button class="btn btn-primary chat-btn-enviar" id="chat-btn-enviar">'+icon("check")+'</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
 
-  return '<div class="page-header">'+
-    '<div class="page-title">'+diaSemana+', '+dataFormatada+'</div>'+
-    '<div class="page-sub">Seu dia em um lugar só — ontem fechado, hoje em andamento</div>'+
-  '</div>'+
-
-  '<div class="section-title" style="margin-top:0;">📋 Ontem — dados fechados</div>'+
-  '<div class="dia-grid">'+sonoCard+celularCard+movCard+habitosCard+'</div>'+
-
-  '<div class="section-title">🌅 Hoje — em andamento</div>'+
-  '<div class="dia-grid">'+momentosCard+leiturasCard+
-    '<div class="dia-card dia-card-vazio is-disabled">'+icon("food")+'<span>Alimentação</span><div class="dia-card-missing">Em breve</div></div>'+
-    '<div class="dia-card dia-card-vazio is-disabled">'+icon("calendar")+'<span>Agenda</span><div class="dia-card-missing">Em breve</div></div>'+
-  '</div>'+
-
-  '<div class="section-title">🤖 Falar com uma equipe</div>'+
-  '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
-    '<button class="btn btn-ghost" data-nav="analiseIA" data-equipe="sono">'+icon("moon")+' Especialista de Sono</button>'+
-    '<button class="btn btn-ghost" data-nav="analiseIA" data-equipe="exercicios">'+icon("run")+' Desempenho Físico</button>'+
-    '<button class="btn btn-ghost" data-nav="analiseIA" data-equipe="alimentacao" disabled style="opacity:.4;">'+icon("food")+' Equipe Nutricional <span class="nav-soon">em breve</span></button>'+
+    // Coluna direita: hábitos
+    '<div class="chat-sidebar">'+
+      '<div class="habitos-painel-header">'+
+        '<span>'+icon("checklist")+'Hábitos de hoje</span>'+
+        (totalHoje > 0 ? '<span class="habito-score">'+cumpridos+'/'+totalHoje+'</span>' : '')+
+      '</div>'+
+      '<div class="habitos-painel-list" id="habitos-painel-list">'+habitosPainel+'</div>'+
+      (totalHoje > 0 ?
+        '<div style="margin-top:10px;">'+
+          '<textarea id="habito-obs-hoje" placeholder="Observações do dia..." rows="2" style="width:100%;font-size:12px;resize:none;"></textarea>'+
+        '</div>' : '')+
+    '</div>'+
   '</div>';
 }
 
@@ -917,6 +1075,36 @@ function renderDashboardSono(){
 
 function renderRegistroSonoForm(isCochilo, parentGrupoData){
   const today = new Date().toISOString().slice(0,10);
+
+  // Modo edição: pré-preenche com dados do registro existente
+  const editId = !isCochilo ? (state.sonoEditandoId || null) : null;
+  const regEdit = editId ? state.registrosSono.find(function(r){ return r.id===editId; }) : null;
+
+  if (regEdit) {
+    function decToHM(h){ if (!h && h!==0) return ""; const hh=Math.floor(h), mm=Math.round((h-hh)*60); return String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0"); }
+    const isCoch = regEdit.tipo === "cochilo";
+    const titulo = '<div class="insight-row" style="margin-bottom:16px;border-color:var(--warning);">'+icon("bulb")+
+      '<span>Editando registro de '+(isCoch?"cochilo":"sono")+" de "+new Date(regEdit.grupoData+"T00:00:00").toLocaleDateString("pt-BR")+
+      (regEdit.origem==="relogio" ? ' <span style="color:var(--text-faint);font-size:11px;">(dado do relógio — edite para corrigir)</span>' : '')+
+      '</span></div>';
+    return '<div class="form-grid" data-cochilo="'+(isCoch?"1":"0")+'" data-grupo="'+(regEdit.grupoData||"")+'" data-editid="'+editId+'">'+
+      titulo+
+      field("Data", '<input type="date" id="f-data" value="'+regEdit.grupoData+'" '+(isCoch?"readonly":"")+' />') +
+      (!isCoch ? '<div class="form-row">'+field("Fui dormir", '<input type="time" id="f-dormiu" value="'+(regEdit.dormiu||"22:30")+'" />')+field("Acordei", '<input type="time" id="f-acordou" value="'+(regEdit.acordou||"06:00")+'" />')+'</div>' : '') +
+      field("Horas de sono total", '<input type="text" id="f-total" placeholder="ex: 8:10" value="'+decToHM(regEdit.horasSonoTotal||regEdit.horasNaCama)+'" />') +
+      field("Horas de sono real", '<input type="text" id="f-real" placeholder="ex: 7:40" value="'+decToHM(regEdit.horasSonoReal)+'" />') +
+      '<div class="field"><label class="field-label">Diferença total x real</label><div id="f-diferenca-out" style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);padding:10px 0;">—</div></div>'+
+      field("Sono REM", '<input type="text" id="f-rem" placeholder="ex: 1:40" value="'+decToHM(regEdit.horasRem)+'" />') +
+      field("% de Sono REM", '<div id="f-pctrem-out" style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);padding:10px 0;">—</div>') +
+      field("Sono profundo", '<input type="text" id="f-fundo" placeholder="ex: 0:50" value="'+decToHM(regEdit.horasFundo)+'" />') +
+      field("% de Sono profundo", '<div id="f-pctfundo-out" style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);padding:10px 0;">—</div>') +
+      field("Pontuação do sono (score)", '<input type="number" id="f-score" min="0" max="100" value="'+(regEdit.scoreOriginal||"80")+'"/>') +
+      field("Observação", '<textarea id="f-notas" rows="2">'+(regEdit.notas||"")+'</textarea>') +
+      '<button class="btn btn-primary" id="btn-salvar-sono">'+icon("check")+' Salvar alterações</button>'+
+      '<button class="btn btn-ghost" id="btn-cancelar-edit-sono" type="button">Cancelar</button>'+
+      '<div class="toast" id="msg-salvo-sono" style="display:none;">'+icon("check")+' Registro atualizado</div></div>';
+  }
+
   const titulo = isCochilo ? '<div class="insight-row" style="margin-bottom:16px;">'+icon("bulb")+'<span>Registrando um cochilo. Os valores serão somados ao sono principal do dia '+(parentGrupoData?new Date(parentGrupoData+"T00:00:00").toLocaleDateString("pt-BR"):"")+'.</span></div>' : '';
   return '<div class="form-grid" data-cochilo="'+(isCochilo?"1":"0")+'" data-grupo="'+(parentGrupoData||"")+'">'+
     titulo +
@@ -935,7 +1123,6 @@ function renderRegistroSonoForm(isCochilo, parentGrupoData){
     (!isCochilo ? '<button class="btn btn-ghost" id="btn-add-cochilo" type="button">+ Adicionar cochilo</button>' : '')+
     '<div class="toast" id="msg-salvo-sono" style="display:none;">'+icon("check")+' Registro salvo</div></div>';
 }
-
 function parseHM(str){
   if (!str) return null;
   const parts = str.split(":");
@@ -947,27 +1134,107 @@ function parseHM(str){
 
 function renderHistoricoSono(){
   const { start, end } = getPeriodoAtual();
+  const v = state.sonoView || { tipo: "semana" };
   const grupos = [...gruposSonoNoPeriodo(regsNoPeriodo(start,end))].sort((a,b)=>b.data.localeCompare(a.data));
   if (!grupos.length) return renderPeriodSelector() + '<div class="empty-state">Nenhum registro neste período.</div>';
+
+  const isSemana = v.tipo === "semana";
+
+  if (isSemana) {
+    // ── Visualização em CARDS (semanal) ──────────────────
+    return renderPeriodSelector() +
+      '<div class="sono-cards-grid">' +
+      grupos.map(function(g){
+        const cat = categoriaPorScore(g.score);
+        const diaSemana = new Date(g.data+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short"}).replace(".","");
+        const diaNum = new Date(g.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
+        const corBorda = cat ? cat.color : "var(--border)";
+        const remInfo = (g.horasRem!==null && g.horasRem>0) ? fmtHoras(g.horasRem)+(g.pctRem!==null?' ('+g.pctRem.toFixed(1)+'%)':'') : '—';
+        const fundoInfo = (g.horasFundo!==null && g.horasFundo>0) ? fmtHoras(g.horasFundo)+(g.pctFundo!==null?' ('+g.pctFundo.toFixed(1)+'%)':'') : '—';
+        const origemTag = g.noite && g.noite.origem === "relogio"
+          ? '<span style="font-size:10px;background:var(--blue-dim);color:var(--blue);padding:2px 7px;border-radius:5px;font-weight:500;">⌚ relógio</span>'
+          : '<span style="font-size:10px;background:rgba(255,255,255,0.06);color:var(--text-faint);padding:2px 7px;border-radius:5px;font-weight:500;">✎ manual</span>';
+
+        return '<div class="sono-card" style="border-left:3px solid '+corBorda+';">'+
+          // Cabeçalho
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'+
+            '<div>'+
+              '<div style="font-family:var(--font-display);font-size:15px;font-weight:600;text-transform:capitalize;">'+diaSemana+'</div>'+
+              '<div style="font-size:12px;color:var(--text-faint);font-family:var(--font-mono);">'+diaNum+'</div>'+
+            '</div>'+
+            '<div style="display:flex;align-items:center;gap:6px;">'+
+              origemTag+
+              (cat?'<div class="badge" style="background:'+cat.color+'22;color:'+cat.color+';">'+g.score+'</div>':'<div class="badge badge-neutral">—</div>')+
+            '</div>'+
+          '</div>'+
+          // Score visual
+          (cat?'<div style="font-size:11.5px;font-weight:600;color:'+cat.color+';margin-bottom:10px;">'+cat.label+'</div>':'')+
+          // Horários
+          '<div style="display:flex;gap:8px;margin-bottom:10px;">'+
+            '<div style="flex:1;background:var(--surface);border-radius:var(--radius-sm);padding:8px;text-align:center;">'+
+              '<div style="font-size:10px;color:var(--text-faint);margin-bottom:2px;">dormiu</div>'+
+              '<div style="font-family:var(--font-mono);font-size:14px;font-weight:500;">'+(g.dormiu||'—')+'</div>'+
+            '</div>'+
+            '<div style="flex:1;background:var(--surface);border-radius:var(--radius-sm);padding:8px;text-align:center;">'+
+              '<div style="font-size:10px;color:var(--text-faint);margin-bottom:2px;">acordou</div>'+
+              '<div style="font-family:var(--font-mono);font-size:14px;font-weight:500;">'+(g.acordou||'—')+'</div>'+
+            '</div>'+
+          '</div>'+
+          // Métricas
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;">'+
+            '<div style="background:var(--surface);border-radius:var(--radius-sm);padding:7px 10px;">'+
+              '<div style="font-size:10px;color:var(--text-faint);">Total</div>'+
+              '<div style="font-family:var(--font-mono);font-size:13px;font-weight:500;">'+fmtHoras(g.horasNaCama)+'</div>'+
+            '</div>'+
+            '<div style="background:var(--surface);border-radius:var(--radius-sm);padding:7px 10px;">'+
+              '<div style="font-size:10px;color:var(--text-faint);">Real</div>'+
+              '<div style="font-family:var(--font-mono);font-size:13px;font-weight:500;">'+fmtHoras(g.horasSonoReal)+'</div>'+
+            '</div>'+
+            '<div style="background:var(--surface);border-radius:var(--radius-sm);padding:7px 10px;">'+
+              '<div style="font-size:10px;color:var(--text-faint);">REM</div>'+
+              '<div style="font-family:var(--font-mono);font-size:13px;">'+remInfo+'</div>'+
+            '</div>'+
+            '<div style="background:var(--surface);border-radius:var(--radius-sm);padding:7px 10px;">'+
+              '<div style="font-size:10px;color:var(--text-faint);">Profundo</div>'+
+              '<div style="font-family:var(--font-mono);font-size:13px;">'+fundoInfo+'</div>'+
+            '</div>'+
+          '</div>'+
+          // Cochilos
+          (g.temCochilo?'<div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">+'+g.cochilos.length+' cochilo'+(g.cochilos.length>1?"s":"")+'</div>':'')+
+          // Ações
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+            '<button class="btn btn-ghost" data-editsono="'+g.noite.id+'" style="flex:1;padding:7px;font-size:12px;">'+icon("edit")+' Editar</button>'+
+            '<button class="icon-btn" data-addnap="'+g.data+'" title="Adicionar cochilo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>'+
+            '<button class="icon-btn" data-delsono="'+g.noite.id+'" title="Excluir">'+icon("trash")+'</button>'+
+          '</div>'+
+        '</div>';
+      }).join("") +
+      '</div>';
+  }
+
+  // ── Visualização em LISTA (mês, período) ──────────────────
   return renderPeriodSelector() + grupos.map(function(g){
     const cat = categoriaPorScore(g.score);
     const dataFmt = new Date(g.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",weekday:"short"});
     const cochiloTag = g.temCochilo ? '<span class="module-tile-tag" style="margin-left:8px;">+'+g.cochilos.length+' cochilo'+(g.cochilos.length>1?"s":"")+'</span>' : '';
     const remInfo = (g.horasRem!==null && g.horasRem>0) ? ' · REM '+fmtHoras(g.horasRem)+(g.pctRem!==null?' ('+g.pctRem.toFixed(1)+'%)':'') : '';
     const fundoInfo = (g.horasFundo!==null && g.horasFundo>0) ? ' · prof. '+fmtHoras(g.horasFundo)+(g.pctFundo!==null?' ('+g.pctFundo.toFixed(1)+'%)':'') : '';
-    let html = '<div class="list-row" style="flex-wrap:wrap;"><div class="list-row-main"><div class="list-row-title">'+dataFmt + cochiloTag + '</div>'+
-      '<div class="list-row-sub">'+(g.dormiu||"—")+' &rarr; '+(g.acordou||"—")+' · total '+fmtHoras(g.horasNaCama)+' · real '+fmtHoras(g.horasSonoReal)+remInfo+fundoInfo+'</div></div>'+
+    const origemIcon = g.noite && g.noite.origem === "relogio" ? ' ⌚' : '';
+    let html = '<div class="list-row" style="flex-wrap:wrap;"><div class="list-row-main"><div class="list-row-title">'+dataFmt+origemIcon + cochiloTag + '</div>'+
+      '<div class="list-row-sub">'+(g.dormiu||"—")+' → '+(g.acordou||"—")+' · total '+fmtHoras(g.horasNaCama)+' · real '+fmtHoras(g.horasSonoReal)+remInfo+fundoInfo+'</div></div>'+
       '<div class="badge" style="background:'+(cat?cat.color+'22':'')+';color:'+(cat?cat.color:'var(--text-dim)')+';">'+g.score+' · '+(cat?cat.label.replace("Sono ",""):"—")+'</div>'+
-      '<button class="icon-btn" data-addnap="'+g.data+'" aria-label="Adicionar cochilo neste dia" title="Adicionar cochilo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>'+
-      '<button class="icon-btn" data-delsono="'+g.noite.id+'" aria-label="Excluir registro">'+icon("trash")+'</button></div>';
+      '<button class="icon-btn" data-editsono="'+g.noite.id+'" title="Editar">'+icon("edit")+'</button>'+
+      '<button class="icon-btn" data-addnap="'+g.data+'" title="Adicionar cochilo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>'+
+      '<button class="icon-btn" data-delsono="'+g.noite.id+'" title="Excluir">'+icon("trash")+'</button></div>';
     if (g.cochilos.length) {
       html += g.cochilos.map(function(c){
         const remC = (c.horasRem!==null && c.horasRem>0) ? ' · REM '+fmtHoras(c.horasRem) : '';
         const fundoC = (c.horasFundo!==null && c.horasFundo>0) ? ' · prof. '+fmtHoras(c.horasFundo) : '';
         return '<div class="list-row" style="margin-left:20px;background:transparent;border-style:dashed;opacity:0.85;"><div class="list-row-main">'+
           '<div class="list-row-title" style="font-size:12.5px;font-weight:400;color:var(--text-dim);">Cochilo</div>'+
-          '<div class="list-row-sub">total '+fmtHoras(c.horasNaCama)+' · real '+fmtHoras(c.horasSonoReal)+remC+fundoC+' · score +'+(scoreNoite(c)||0)+'</div></div>'+
-          '<button class="icon-btn" data-delsono="'+c.id+'" aria-label="Excluir cochilo">'+icon("trash")+'</button></div>';
+          '<div class="list-row-sub">total '+fmtHoras(c.horasNaCama)+' · real '+fmtHoras(c.horasSonoReal)+remC+fundoC+'</div></div>'+
+          '<button class="icon-btn" data-editsono="'+c.id+'" title="Editar">'+icon("edit")+'</button>'+
+          '<button class="icon-btn" data-delsono="'+c.id+'" title="Excluir">'+icon("trash")+'</button></div>';
       }).join("");
     }
     return html;
@@ -2620,6 +2887,175 @@ function gerarSystemPromptEquipe(equipe){
   return perfil+"Você é um assistente especializado na Central de Qualidade de Vida do Cássio. Ajude com base nos dados disponíveis.";
 }
 
+// ══════════════════════════════════════════════════════════
+// CENTRAL IA — Lógica de envio e execução de registros
+// ══════════════════════════════════════════════════════════
+
+async function enviarChatCentral(){
+  const chatInput = document.getElementById("chat-input");
+  if (!chatInput) return;
+  const texto = chatInput.value.trim();
+  const imagem = state.chatImagemPendente || null;
+  if (!texto && !imagem) return;
+
+  chatInput.value = "";
+  chatInput.style.height = "auto";
+  state.chatImagemPendente = null;
+  const chatExtras = document.getElementById("chat-input-extras");
+  if (chatExtras) chatExtras.innerHTML = "";
+  const fileInput = document.getElementById("chat-file-input");
+  if (fileInput) fileInput.value = "";
+
+  if (!state.chatCentralIA) state.chatCentralIA = [];
+  const hora = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  state.chatCentralIA.push({ role:"user", texto, imagem, hora });
+  render();
+
+  // Scroll para o fim
+  setTimeout(function(){
+    const msgs = document.getElementById("chat-msgs");
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  }, 50);
+
+  // Construir mensagem para a API
+  const userContent = [];
+  if (imagem) {
+    const base64 = imagem.split(",")[1];
+    const mediaType = imagem.split(";")[0].split(":")[1] || "image/jpeg";
+    userContent.push({ type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } });
+  }
+  if (texto) userContent.push({ type:"text", text:texto });
+
+  // Histórico para contexto multi-turno (apenas últimas 10 msgs para não explodir o contexto)
+  const historico = (state.chatCentralIA||[]).slice(-10).map(function(m){
+    if (m.role==="user") {
+      const c = [];
+      if (m.imagem) {
+        const b64 = m.imagem.split(",")[1];
+        const mt = m.imagem.split(";")[0].split(":")[1] || "image/jpeg";
+        c.push({ type:"image", source:{ type:"base64", media_type:mt, data:b64 } });
+      }
+      if (m.texto) c.push({ type:"text", text:m.texto });
+      return { role:"user", content: c.length===1 && c[0].type==="text" ? m.texto : c };
+    }
+    if (m.role==="assistant") return { role:"assistant", content:m.resposta||"" };
+    return null;
+  }).filter(Boolean);
+
+  // Indicador de loading
+  const loadingIdx = Date.now();
+  state.chatCentralIA.push({ role:"loading", idx:loadingIdx });
+  render();
+  setTimeout(function(){ const msgs = document.getElementById("chat-msgs"); if (msgs) msgs.scrollTop = msgs.scrollHeight; }, 50);
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system: gerarSystemPromptCentralIA(),
+        messages: historico
+      })
+    });
+    const data = await response.json();
+    const rawText = (data.content && data.content[0]) ? data.content[0].text : null;
+
+    // Remove loading
+    state.chatCentralIA = state.chatCentralIA.filter(function(m){ return m.idx !== loadingIdx; });
+
+    if (!rawText) throw new Error("Resposta vazia");
+
+    let parsed;
+    try {
+      const clean = rawText.replace(/^```json\s*/i,"").replace(/```\s*$/,"").trim();
+      parsed = JSON.parse(clean);
+    } catch(e) {
+      // Se não parsear como JSON, trata como texto simples
+      parsed = { resposta: rawText, perguntas:[], registros:[] };
+    }
+
+    const msgIdx = Date.now();
+    state.chatCentralIA.push({
+      role:"assistant",
+      idx: msgIdx,
+      especialista: parsed.especialista || "Equipe Central IA",
+      resposta: parsed.resposta || "Entendido!",
+      perguntas: parsed.perguntas || [],
+      registros: parsed.registros || [],
+      confirmado: false,
+      ignorado: false,
+      hora: new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
+    });
+  } catch(err) {
+    state.chatCentralIA = state.chatCentralIA.filter(function(m){ return m.idx !== loadingIdx; });
+    state.chatCentralIA.push({
+      role:"assistant", idx:Date.now(),
+      resposta:"Não consegui me conectar à equipe. Verifique sua conexão e tente novamente.",
+      perguntas:[], registros:[], confirmado:false, ignorado:false,
+      hora: new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
+    });
+  }
+  render();
+  setTimeout(function(){ const msgs = document.getElementById("chat-msgs"); if (msgs) msgs.scrollTop = msgs.scrollHeight; }, 80);
+}
+
+async function executarRegistrosChatCentral(registros){
+  const hoje = new Date().toISOString().slice(0,10);
+  for (const r of registros) {
+    try {
+      if (r.modulo === "sono" && r.dados) {
+        const d = r.dados;
+        const reg = {
+          grupoData: d.grupoData||hoje, data: d.grupoData||hoje,
+          tipo: d.tipo||"noite", dormiu: d.dormiu||null, acordou: d.acordou||null,
+          horasNaCama: d.horasNaCama||null, horasSonoReal: d.horasSonoReal||null,
+          horasRem: d.horasRem||null, horasFundo: d.horasFundo||null,
+          pctRem: d.horasRem&&d.horasSonoReal ? Math.round((d.horasRem/d.horasSonoReal)*1000)/10 : null,
+          pctFundo: d.horasFundo&&d.horasSonoReal ? Math.round((d.horasFundo/d.horasSonoReal)*1000)/10 : null,
+          scoreOriginal: d.scoreOriginal||null, notas: d.notas||"", importado:false, origem:"manual"
+        };
+        const existente = state.registrosSono.find(function(s){ return s.grupoData===reg.grupoData && s.tipo==="noite"; });
+        if (existente) { await DB.deleteSono(existente.id); state.registrosSono = state.registrosSono.filter(function(s){ return s.id!==existente.id; }); }
+        const salvo = await saveSono(reg);
+        if (salvo) state.registrosSono.push(salvo);
+      }
+      else if (r.modulo === "celular" && r.dados) {
+        const d = r.dados;
+        const reg = { data:d.data||hoje, horasConsumo:d.horasConsumo||0, horasMaps:d.horasMaps||0, notas:d.notas||"" };
+        const existente = state.celularDiario.find(function(c){ return c.data===reg.data; });
+        if (existente) reg.id = existente.id;
+        const salvo = await DB.upsertCelularDiario(reg);
+        if (salvo) {
+          state.celularDiario = state.celularDiario.filter(function(c){ return c.data!==reg.data; });
+          state.celularDiario.push(salvo);
+        }
+      }
+      else if (r.modulo === "movimentacao" && r.dados) {
+        const d = r.dados;
+        const reg = { data:d.data||hoje, passos:d.passos||null, minutosAtivo:d.minutosAtivo||null, caloriasTotais:d.caloriasTotais||null, caloriasAtividade:d.caloriasAtividade||null, distanciaKm:d.distanciaKm||null, origem:"manual" };
+        const existente = state.movimentacao ? state.movimentacao.find(function(m){ return m.data===reg.data; }) : null;
+        if (existente) reg.id = existente.id;
+        const salvo = await DB.upsertMovimentacao(reg);
+        if (salvo && state.movimentacao) {
+          state.movimentacao = state.movimentacao.filter(function(m){ return m.data!==reg.data; });
+          state.movimentacao.push(salvo);
+        }
+      }
+      else if (r.modulo === "diario" && r.dados) {
+        const d = r.dados;
+        const novoMomento = { titulo:d.titulo||"Anotação do dia", data:d.data||hoje, anotacao:d.anotacao||"", fotoUrl:null };
+        const salvo = await DB.upsertMomento(novoMomento);
+        if (salvo) state.momentos.push(salvo);
+      }
+      // modulo alimentacao: será implementado quando o módulo completo for criado
+    } catch(e) {
+      console.error("Erro ao executar registro", r.modulo, e);
+    }
+  }
+}
+
 function attachHandlers(){
   document.querySelectorAll("[data-nav]").forEach(function(btn){
     btn.addEventListener("click", function(e){
@@ -2666,11 +3102,8 @@ function attachHandlers(){
       inputIA.value = "";
       btnEnviarIA.disabled = true;
       if (loadingIA) loadingIA.style.display = "block";
-
       if (!state.analiseIAHistorico) state.analiseIAHistorico = [];
       state.analiseIAHistorico.push({ role: "user", content: texto });
-
-      // Adiciona msg do user na tela imediatamente
       if (msgsIA) {
         const msgEl = document.createElement("div");
         msgEl.className = "ia-msg-user";
@@ -2678,19 +3111,13 @@ function attachHandlers(){
         msgsIA.appendChild(msgEl);
         msgsIA.scrollTop = msgsIA.scrollHeight;
       }
-
       try {
         const equipe = state.analiseIAEquipe || "sono";
         const systemPrompt = gerarSystemPromptEquipe(equipe);
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            max_tokens: 1000,
-            system: systemPrompt,
-            messages: state.analiseIAHistorico
-          })
+          body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, system: systemPrompt, messages: state.analiseIAHistorico })
         });
         const data = await response.json();
         const resposta = data.content && data.content[0] ? data.content[0].text : "Não foi possível obter resposta.";
@@ -2718,7 +3145,131 @@ function attachHandlers(){
     inputIA.addEventListener("keydown", function(e){ if (e.key==="Enter" && !e.shiftKey){ e.preventDefault(); enviarMensagemIA(); } });
   }
 
-  const backLinkEl = document.getElementById("backLink");
+  // ══════════════════════════════════════════════════════════
+  // CENTRAL IA — Handlers do chat multidisciplinar
+  // ══════════════════════════════════════════════════════════
+  const chatInput = document.getElementById("chat-input");
+  const chatBtnEnviar = document.getElementById("chat-btn-enviar");
+  const chatFileInput = document.getElementById("chat-file-input");
+  const chatExtras = document.getElementById("chat-input-extras");
+
+  // Auto-resize textarea
+  if (chatInput) {
+    chatInput.addEventListener("input", function(){
+      this.style.height = "auto";
+      this.style.height = Math.min(this.scrollHeight, 160) + "px";
+    });
+    chatInput.addEventListener("keydown", function(e){
+      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); enviarChatCentral(); }
+    });
+  }
+
+  // Preview imagem anexada
+  if (chatFileInput) {
+    chatFileInput.addEventListener("change", function(){
+      const file = chatFileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev){
+        state.chatImagemPendente = ev.target.result;
+        if (chatExtras) {
+          chatExtras.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;">'+
+            '<img src="'+ev.target.result+'" style="height:56px;border-radius:6px;border:1px solid var(--border);object-fit:cover;" />'+
+            '<span style="font-size:12px;color:var(--text-dim);">'+file.name+'</span>'+
+            '<button id="chat-remove-img" class="icon-btn">'+icon("trash")+'</button>'+
+          '</div>';
+          document.getElementById("chat-remove-img").addEventListener("click", function(){
+            state.chatImagemPendente = null;
+            chatExtras.innerHTML = "";
+            chatFileInput.value = "";
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Exemplos de mensagem rápida
+  document.querySelectorAll(".chat-example").forEach(function(el){
+    el.addEventListener("click", function(){
+      const exemplo = el.getAttribute("data-exemplo");
+      if (chatInput) { chatInput.value = exemplo; chatInput.focus(); }
+    });
+  });
+
+  // Limpar conversa
+  const btnLimpar = document.getElementById("btn-chat-limpar");
+  if (btnLimpar) btnLimpar.addEventListener("click", function(){
+    state.chatCentralIA = [];
+    state.chatImagemPendente = null;
+    render();
+  });
+
+  // Botão enviar
+  if (chatBtnEnviar) chatBtnEnviar.addEventListener("click", enviarChatCentral);
+
+  // Confirmar registros
+  document.querySelectorAll(".chat-btn-confirmar").forEach(function(btn){
+    btn.addEventListener("click", async function(){
+      const idx = parseInt(btn.getAttribute("data-msgidx"));
+      const msgs = state.chatCentralIA || [];
+      const msg = msgs.find(function(m){ return m.idx === idx; });
+      if (!msg || !msg.registros) return;
+      btn.disabled = true;
+      btn.textContent = "Registrando...";
+      await executarRegistrosChatCentral(msg.registros);
+      msg.confirmado = true;
+      render();
+    });
+  });
+
+  // Ignorar registros
+  document.querySelectorAll(".chat-btn-ignorar").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      const idx = parseInt(btn.getAttribute("data-msgidx"));
+      const msgs = state.chatCentralIA || [];
+      const msg = msgs.find(function(m){ return m.idx === idx; });
+      if (msg) { msg.ignorado = true; render(); }
+    });
+  });
+
+  // Hábitos do painel lateral (Central IA)
+  document.querySelectorAll(".habito-painel-item[data-habitoid]").forEach(function(item){
+    item.addEventListener("click", async function(){
+      const habitoId = item.getAttribute("data-habitoid");
+      const hoje = new Date().toISOString().slice(0,10);
+      const regExistente = (typeof registroHabitoNoDia === "function") ? registroHabitoNoDia(habitoId, hoje) : null;
+      if (regExistente) {
+        // Desmarcar
+        await DB.deleteRegistroHabito(regExistente.id);
+        state.registrosHabitos = state.registrosHabitos.filter(function(r){ return r.id!==regExistente.id; });
+      } else {
+        // Marcar
+        const obs = document.getElementById("habito-obs-hoje") ? document.getElementById("habito-obs-hoje").value : "";
+        const salvo = await DB.upsertRegistroHabito({ habitoId, data: hoje, concluido: true, observacao: obs });
+        if (salvo) state.registrosHabitos.push(salvo);
+      }
+      // Re-render só o painel de hábitos sem re-render full (para não perder o chat)
+      const lista = document.getElementById("habitos-painel-list");
+      if (lista) {
+        const hoje2 = new Date().toISOString().slice(0,10);
+        const aplicaveis = state.habitos.filter(function(h){ return h.ativo && (typeof habitoAplicavelNoDia === "function") && habitoAplicavelNoDia(h,hoje2); });
+        lista.innerHTML = aplicaveis.map(function(h){
+          const reg = (typeof registroHabitoNoDia === "function") ? registroHabitoNoDia(h.id, hoje2) : null;
+          const feito = !!reg;
+          return '<div class="habito-painel-item '+(feito?"habito-feito":"habito-pendente")+'" data-habitoid="'+h.id+'">'+
+            '<span class="habito-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'+
+            (feito ? '<path d="M5 13l4 4L19 7"/>' : '<circle cx="12" cy="12" r="9"/>') +'</svg></span>'+
+            '<span class="habito-nome">'+h.nome+'</span>'+
+          '</div>';
+        }).join("") || '<div class="habitos-painel-empty">Nenhum hábito para hoje.</div>';
+        // Re-bind handlers no novo HTML
+        lista.querySelectorAll(".habito-painel-item[data-habitoid]").forEach(function(it){
+          it.addEventListener("click", arguments.callee.caller);
+        });
+      }
+    });
+  });
   if (backLinkEl) backLinkEl.addEventListener("click", function(e){ e.preventDefault(); state.view = "inicio"; render(); });
 
   document.querySelectorAll("[data-sonotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.sonoTab = btn.getAttribute("data-sonotab"); state.sonoCochiloMode = null; render(); }); });
@@ -2757,6 +3308,7 @@ function attachHandlers(){
   if (btnSalvarSono) btnSalvarSono.addEventListener("click", async function(){
     const formEl = document.querySelector(".form-grid[data-cochilo]");
     const isCochilo = formEl && formEl.getAttribute("data-cochilo") === "1";
+    const editId = formEl ? formEl.getAttribute("data-editid") : null;
     const dataVal = document.getElementById("f-data").value;
     const total = parseHM(document.getElementById("f-total").value);
     const real = parseHM(document.getElementById("f-real").value);
@@ -2775,11 +3327,17 @@ function attachHandlers(){
       horasNaCama: total, horasSonoReal: real, horasRem: rem, horasFundo: fundo,
       pctRem: (rem!==null && real) ? Math.round((rem/real)*1000)/10 : null,
       pctFundo: (fundo!==null && real) ? Math.round((fundo/real)*1000)/10 : null,
-      scoreOriginal: score, notas: notas, importado: false
+      scoreOriginal: score, notas: notas, importado: false,
+      origem: "manual"
     };
 
-    if (!isCochilo) {
-      // remove o registro de noite existente da mesma data (no banco e em memória), mantendo cochilos do dia
+    if (editId) {
+      // Modo edição: remove só o registro específico pelo ID e insere o atualizado
+      reg.id = undefined; // vai criar novo com dados corrigidos
+      await deleteSonoRemoto(editId);
+      state.registrosSono = state.registrosSono.filter(r => r.id !== editId);
+    } else if (!isCochilo) {
+      // Novo registro de noite: remove registros de noite existentes do mesmo dia
       const existente = state.registrosSono.find(r => r.grupoData===dataVal && r.tipo==="noite");
       if (existente) { await deleteSonoRemoto(existente.id); }
       state.registrosSono = state.registrosSono.filter(r => !(r.grupoData===dataVal && r.tipo==="noite"));
@@ -2787,6 +3345,14 @@ function attachHandlers(){
     const salvo = await saveSono(reg);
     if (salvo) state.registrosSono.push(salvo);
     state.sonoCochiloMode = null;
+    state.sonoEditandoId = null;
+    state.sonoTab = "historico";
+    render();
+  });
+
+  const btnCancelarEditSono = document.getElementById("btn-cancelar-edit-sono");
+  if (btnCancelarEditSono) btnCancelarEditSono.addEventListener("click", function(){
+    state.sonoEditandoId = null;
     state.sonoTab = "historico";
     render();
   });
@@ -2798,6 +3364,12 @@ function attachHandlers(){
     render();
   }); });
   document.querySelectorAll("[data-addnap]").forEach(function(btn){ btn.addEventListener("click", function(){ state.sonoCochiloMode = btn.getAttribute("data-addnap"); state.sonoTab = "registro"; render(); }); });
+  document.querySelectorAll("[data-editsono]").forEach(function(btn){ btn.addEventListener("click", function(){
+    const id = btn.getAttribute("data-editsono");
+    state.sonoEditandoId = id;
+    state.sonoTab = "registro";
+    render();
+  }); });
 
   const btnParamSono = document.getElementById("btn-salvar-param-sono");
   if (btnParamSono) btnParamSono.addEventListener("click", async function(){
