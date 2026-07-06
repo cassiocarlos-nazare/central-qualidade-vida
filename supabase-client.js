@@ -56,10 +56,28 @@ function appCelularToRow(c){
 }
 
 function rowLivroToApp(r){
-  return { id: r.id, titulo: r.titulo, paginas: r.paginas, horasLeitura: r.horas_leitura!==null?Number(r.horas_leitura):null, status: r.status, importado: r.importado };
+  return {
+    id: r.id, titulo: r.titulo, autor: r.autor, genero: r.genero,
+    paginas: r.paginas, horasLeitura: r.horas_leitura!==null?Number(r.horas_leitura):null,
+    status: r.status, importado: r.importado,
+    dataInicio: r.data_inicio, paginaAtual: r.pagina_atual!==null?Number(r.pagina_atual):null,
+    dataTermino: r.data_termino, pontuacao: r.pontuacao!==null?Number(r.pontuacao):null
+  };
 }
 function appLivroToRow(l){
-  return { id: (l.id && l.id.length===36) ? l.id : undefined, titulo: l.titulo, paginas: l.paginas, horas_leitura: l.horasLeitura, status: l.status, importado: l.importado || false };
+  return {
+    id: (l.id && l.id.length===36) ? l.id : undefined, titulo: l.titulo, autor: l.autor||null, genero: l.genero||null,
+    paginas: l.paginas, horas_leitura: l.horasLeitura, status: l.status, importado: l.importado || false,
+    data_inicio: l.dataInicio||null, pagina_atual: l.paginaAtual!==undefined?l.paginaAtual:null,
+    data_termino: l.dataTermino||null, pontuacao: l.pontuacao!==undefined?l.pontuacao:null
+  };
+}
+
+function rowRegistroLeituraToApp(r){
+  return { id: r.id, livroId: r.livro_id, data: r.data, paginaNaqueleDia: Number(r.pagina_naquele_dia) };
+}
+function appRegistroLeituraToRow(r){
+  return { id: (r.id && r.id.length===36) ? r.id : undefined, livro_id: r.livroId, data: r.data, pagina_naquele_dia: r.paginaNaqueleDia };
 }
 
 // ============================================================
@@ -189,6 +207,28 @@ const DB = {
     const rows = livros.map(appLivroToRow).map(r => { delete r.id; return r; });
     const { error } = await sb.from("livros").insert(rows);
     if (error) { console.error("Erro na carga inicial de livros:", error); return false; }
+    return true;
+  },
+
+  async getRegistrosLeitura(){
+    const { data, error } = await sb.from("registros_leitura_dia").select("*").order("data", { ascending: true });
+    if (error) { console.error("Erro ao buscar registros de leitura:", error); return []; }
+    return data.map(rowRegistroLeituraToApp);
+  },
+  async upsertRegistroLeitura(reg){
+    // upsert manual por (livro_id, data): se já existir registro nesse dia para esse livro, atualiza; senão insere
+    const row = appRegistroLeituraToRow(reg);
+    if (!row.id) {
+      const { data: existente } = await sb.from("registros_leitura_dia").select("id").eq("livro_id", row.livro_id).eq("data", row.data).maybeSingle();
+      if (existente) row.id = existente.id;
+    }
+    const { data, error } = await sb.from("registros_leitura_dia").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar registro de leitura:", error); return null; }
+    return rowRegistroLeituraToApp(data);
+  },
+  async deleteRegistroLeitura(id){
+    const { error } = await sb.from("registros_leitura_dia").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir registro de leitura:", error); return false; }
     return true;
   },
 
@@ -424,7 +464,7 @@ Object.assign(DB, {
 // ============================================================
 function rowPessoaToApp(r){ return { id: r.id, nome: r.nome, ativo: r.ativo!==false }; }
 function rowTagMomentoToApp(r){ return { id: r.id, nome: r.nome, categoria: r.categoria, ativo: r.ativo!==false }; }
-function rowJornadaToApp(r){ return { id: r.id, nome: r.nome, descricao: r.descricao, ativo: r.ativo!==false }; }
+function rowPropositoToApp(r){ return { id: r.id, nome: r.nome, descricao: r.descricao, ativo: r.ativo!==false }; }
 function rowMomentoToApp(r){
   return { id: r.id, titulo: r.titulo, data: r.data, anotacao: r.anotacao, fotoUrl: r.foto_url };
 }
@@ -469,17 +509,28 @@ Object.assign(DB, {
   },
   async contarTagsMomentos(){ const { count } = await sb.from("tags_momentos").select("id", { count: "exact", head: true }); return count || 0; },
 
-  async getJornadas(){
-    const { data, error } = await sb.from("jornadas").select("*").order("nome", { ascending: true });
-    if (error) { console.error("Erro ao buscar jornadas:", error); return []; }
-    return data.map(rowJornadaToApp);
+  async getPropositos(){
+    const { data, error } = await sb.from("propositos").select("*").order("nome", { ascending: true });
+    if (error) { console.error("Erro ao buscar propósitos:", error); return []; }
+    return data.map(rowPropositoToApp);
   },
-  async bulkInsertJornadas(lista){
-    const { error } = await sb.from("jornadas").insert(lista);
-    if (error) { console.error("Erro na carga inicial de jornadas:", error); return false; }
+  async upsertProposito(p){
+    const row = { id: (p.id && p.id.length===36)?p.id:undefined, nome: p.nome, descricao: p.descricao||null, ativo: p.ativo!==false };
+    const { data, error } = await sb.from("propositos").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar propósito:", error); return null; }
+    return rowPropositoToApp(data);
+  },
+  async deleteProposito(id){
+    const { error } = await sb.from("propositos").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir propósito:", error); return false; }
     return true;
   },
-  async contarJornadas(){ const { count } = await sb.from("jornadas").select("id", { count: "exact", head: true }); return count || 0; },
+  async bulkInsertPropositos(lista){
+    const { error } = await sb.from("propositos").insert(lista);
+    if (error) { console.error("Erro na carga inicial de propósitos:", error); return false; }
+    return true;
+  },
+  async contarPropositos(){ const { count } = await sb.from("propositos").select("id", { count: "exact", head: true }); return count || 0; },
 
   async getMomentos(){
     const { data, error } = await sb.from("momentos").select("*").order("data", { ascending: false });
@@ -528,17 +579,17 @@ Object.assign(DB, {
     return true;
   },
 
-  async getMomentoJornadas(){
-    const { data, error } = await sb.from("momento_jornadas").select("*");
-    if (error) { console.error("Erro ao buscar relação momento-jornadas:", error); return []; }
+  async getMomentoPropositos(){
+    const { data, error } = await sb.from("momento_propositos").select("*");
+    if (error) { console.error("Erro ao buscar relação momento-propósitos:", error); return []; }
     return data;
   },
-  async setMomentoJornadas(momentoId, jornadaIds){
-    await sb.from("momento_jornadas").delete().eq("momento_id", momentoId);
-    if (jornadaIds.length) {
-      const rows = jornadaIds.map(function(jid){ return { momento_id: momentoId, jornada_id: jid }; });
-      const { error } = await sb.from("momento_jornadas").insert(rows);
-      if (error) { console.error("Erro ao salvar jornadas do momento:", error); return false; }
+  async setMomentoPropositos(momentoId, propositoIds){
+    await sb.from("momento_propositos").delete().eq("momento_id", momentoId);
+    if (propositoIds.length) {
+      const rows = propositoIds.map(function(pid){ return { momento_id: momentoId, proposito_id: pid }; });
+      const { error } = await sb.from("momento_propositos").insert(rows);
+      if (error) { console.error("Erro ao salvar propósitos do momento:", error); return false; }
     }
     return true;
   },
@@ -548,5 +599,35 @@ Object.assign(DB, {
     if (error) { console.error("Erro ao enviar foto:", error); return null; }
     const { data: urlData } = sb.storage.from("momentos-fotos").getPublicUrl(fileName);
     return urlData.publicUrl;
+  },
+
+  // ── Refeições ──────────────────────────────────────────
+  async getRefeicoes(){
+    const { data, error } = await sb.from("refeicoes").select("*").order("data", { ascending: false }).order("horario", { ascending: true });
+    if (error) { console.error("Erro ao buscar refeições:", error); return []; }
+    return data.map(function(r){
+      return { id:r.id, data:r.data, nome:r.nome, horario:r.horario, descricao:r.descricao,
+        calorias:r.calorias!=null?Number(r.calorias):null, proteinas:r.proteinas!=null?Number(r.proteinas):null,
+        carbs:r.carbs!=null?Number(r.carbs):null, gorduras:r.gorduras!=null?Number(r.gorduras):null,
+        resumoIA:r.resumo_ia, criadoEm:r.criado_em };
+    });
+  },
+  async upsertRefeicao(ref){
+    const row = { id:(ref.id&&ref.id.length===36)?ref.id:undefined, data:ref.data, nome:ref.nome,
+      horario:ref.horario||null, descricao:ref.descricao||null,
+      calorias:ref.calorias!=null?ref.calorias:null, proteinas:ref.proteinas!=null?ref.proteinas:null,
+      carbs:ref.carbs!=null?ref.carbs:null, gorduras:ref.gorduras!=null?ref.gorduras:null,
+      resumo_ia:ref.resumoIA||null, atualizado_em: new Date().toISOString() };
+    const { data, error } = await sb.from("refeicoes").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar refeição:", error); return null; }
+    return { id:data.id, data:data.data, nome:data.nome, horario:data.horario, descricao:data.descricao,
+      calorias:data.calorias!=null?Number(data.calorias):null, proteinas:data.proteinas!=null?Number(data.proteinas):null,
+      carbs:data.carbs!=null?Number(data.carbs):null, gorduras:data.gorduras!=null?Number(data.gorduras):null,
+      resumoIA:data.resumo_ia };
+  },
+  async deleteRefeicao(id){
+    const { error } = await sb.from("refeicoes").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir refeição:", error); return false; }
+    return true;
   }
 });

@@ -33,7 +33,7 @@ const MODULES = [
   { id: "habitos",   label: "Rotina e Hábitos",   icon: "checklist", active: true,  section: "modules" },
   { id: "momentos",  label: "Momentos",            icon: "photo",     active: true,  section: "modules" },
   { id: "sono",      label: "Sono",                icon: "moon",      active: true,  section: "modules" },
-  { id: "alimentacao",label: "Alimentação",        icon: "food",      active: false, section: "modules" },
+  { id: "alimentacao",label: "Alimentação",        icon: "food",      active: true,  section: "modules" },
   { id: "exercicios",label: "Exercícios Físicos",  icon: "run",       active: true,  section: "modules" },
   { id: "agenda",    label: "Agenda",              icon: "calendar",  active: false, section: "modules" },
   { id: "celular",   label: "Uso do Celular",      icon: "phone",     active: true,  section: "modules" },
@@ -66,6 +66,7 @@ let state = {
   momentoPessoas: [],
   momentoTags: [],
   momentoJornadas: [],
+  refeicoes: [],
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -234,9 +235,9 @@ async function loadData(){
     }
 
     const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap,
-      habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas] = await Promise.all([
+      habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas, refeicoes] = await Promise.all([
       DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas(),
-      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getJornadas(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoJornadas()
+      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getJornadas(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoJornadas(), DB.getRefeicoes()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -257,6 +258,7 @@ async function loadData(){
     state.momentoPessoas = momentoPessoas;
     state.momentoTags = momentoTags;
     state.momentoJornadas = momentoJornadas;
+    state.refeicoes = refeicoes;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -1754,6 +1756,176 @@ function renderAnaliseLivros(){
     '<div class="chart-wrap" style="height:'+Math.max(220, livros.length*38+80)+'px;"><canvas id="chartLivros" role="img" aria-label="Gráfico de páginas lidas por livro"></canvas></div>';
 }
 
+// ══════════════════════════════════════════════════════════
+// MÓDULO: ALIMENTAÇÃO
+// ══════════════════════════════════════════════════════════
+
+function refeicoesDoPeriodo(start, end){
+  const s = isoDate(start), e = isoDate(end);
+  return (state.refeicoes||[]).filter(function(r){ return r.data>=s && r.data<=e; });
+}
+
+function totaisDiaAlimentacao(refsNoDia){
+  return {
+    calorias: refsNoDia.reduce(function(a,r){ return a+(r.calorias||0); }, 0),
+    proteinas: refsNoDia.reduce(function(a,r){ return a+(r.proteinas||0); }, 0),
+    carbs: refsNoDia.reduce(function(a,r){ return a+(r.carbs||0); }, 0),
+    gorduras: refsNoDia.reduce(function(a,r){ return a+(r.gorduras||0); }, 0)
+  };
+}
+
+function gastoCaloricoEstimado(){
+  // BMR + fator de atividade (PAL) estimado pela rotina do Cássio
+  const bio = (typeof bioMaisRecente==="function") ? bioMaisRecente() : null;
+  if (!bio || !bio.bmrKcal) return null;
+  const bmr = bio.bmrKcal;
+  const diaSemana = new Date().getDay(); // 0=dom, 1=seg, ..., 6=sab
+  // Seg (futebol society tarde+noite), Qua/Qui (natação), Sáb (futebol campo) = alto
+  // Seg-Sex (musculação manhã) = moderado/alto
+  let pal;
+  if (diaSemana===1) pal = 1.75;       // seg: musculação + futebol society
+  else if (diaSemana===3 || diaSemana===4) pal = 1.65; // qua/qui: musculação + natação
+  else if (diaSemana===6) pal = 1.7;   // sab: futebol de campo
+  else if (diaSemana>=1 && diaSemana<=5) pal = 1.55; // ter/qui/sex: musculação
+  else pal = 1.4; // dom: descanso
+  return Math.round(bmr * pal);
+}
+
+function renderAlimentacaoRegistro(){
+  const hoje = new Date().toISOString().slice(0,10);
+  const ed = state.alimentacaoEditando;
+  return '<div class="form-grid" style="max-width:540px;">'+
+    (ed ? '<div class="insight-row" style="border-color:var(--warning);margin-bottom:16px;">'+icon("bulb")+'<span>Editando refeição de '+new Date(ed.data+"T00:00:00").toLocaleDateString("pt-BR")+'</span></div>' : '')+
+    field("Data", '<input type="date" id="al-data" value="'+(ed?ed.data:hoje)+'" />') +
+    field("Nome da refeição", '<input type="text" id="al-nome" placeholder="ex: Café da manhã, Almoço, Lanche..." value="'+(ed?ed.nome:"")+'" />') +
+    field("Horário (opcional)", '<input type="time" id="al-horario" value="'+(ed&&ed.horario?ed.horario:"")+'" />') +
+    field("O que você comeu", '<textarea id="al-descricao" rows="4" placeholder="Descreva livremente os alimentos, quantidades e marcas. A equipe irá calcular as calorias.">'+(ed&&ed.descricao?ed.descricao:"")+'</textarea>') +
+    '<div class="section-title" style="margin-top:8px;">Valores nutricionais (preenchidos pela equipe)</div>'+
+    '<div class="form-row">'+
+      field("Calorias (kcal)", '<input type="number" id="al-calorias" value="'+(ed&&ed.calorias!=null?ed.calorias:"")+'" placeholder="0" />') +
+      field("Proteínas (g)", '<input type="number" id="al-proteinas" value="'+(ed&&ed.proteinas!=null?ed.proteinas:"")+'" placeholder="0" step="0.1" />') +
+    '</div>'+
+    '<div class="form-row">'+
+      field("Carboidratos (g)", '<input type="number" id="al-carbs" value="'+(ed&&ed.carbs!=null?ed.carbs:"")+'" placeholder="0" step="0.1" />') +
+      field("Gorduras (g)", '<input type="number" id="al-gorduras" value="'+(ed&&ed.gorduras!=null?ed.gorduras:"")+'" placeholder="0" step="0.1" />') +
+    '</div>'+
+    '<button class="btn btn-ghost" id="btn-al-calcular-ia" style="margin-bottom:8px;">'+icon("bulb")+' Calcular com IA</button>'+
+    '<div id="al-ia-loading" style="display:none;font-size:12px;color:var(--text-faint);margin-bottom:8px;">Calculando com a equipe...</div>'+
+    '<button class="btn btn-primary" id="btn-al-salvar">'+icon("check")+' Salvar refeição</button>'+
+    (ed ? '<button class="btn btn-ghost" id="btn-al-cancelar">Cancelar</button>' : '')+
+    '<div class="toast" id="msg-salvo-al" style="display:none;">'+icon("check")+' Refeição salva</div>'+
+  '</div>';
+}
+
+function renderAlimentacaoHistorico(){
+  const { start, end, label } = getPeriodoAtual("alimentacaoView");
+  const refs = refeicoesDoPeriodo(start, end).sort(function(a,b){ return b.data.localeCompare(a.data)||((a.horario||"").localeCompare(b.horario||"")); });
+  if (!refs.length) return renderPeriodSelector("alimentacaoView")+'<div class="empty-state">Nenhuma refeição registrada neste período.</div>';
+
+  // Agrupa por data
+  const porData = {};
+  refs.forEach(function(r){ if (!porData[r.data]) porData[r.data]=[]; porData[r.data].push(r); });
+
+  return renderPeriodSelector("alimentacaoView") +
+    Object.entries(porData).sort(function(a,b){ return b[0].localeCompare(a[0]); }).map(function(entry){
+      const data = entry[0];
+      const refsNoDia = entry[1];
+      const totais = totaisDiaAlimentacao(refsNoDia);
+      const dataFmt = new Date(data+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"2-digit"});
+      return '<div class="section-title">'+dataFmt+
+        ' <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-faint);">'+
+        Math.round(totais.calorias)+' kcal · '+totais.proteinas.toFixed(0)+'g prot</span></div>'+
+        refsNoDia.map(function(r){
+          return '<div class="list-row">'+
+            '<div class="list-row-main">'+
+              '<div class="list-row-title">'+r.nome+(r.horario?' <span style="font-size:11px;color:var(--text-faint);">'+r.horario.slice(0,5)+'</span>':'')+
+                (r.calorias ? ' <span style="font-size:11px;color:var(--text-dim);">· '+Math.round(r.calorias)+' kcal</span>' : '')+
+              '</div>'+
+              '<div class="list-row-sub">'+(r.descricao||"").slice(0,80)+(r.descricao&&r.descricao.length>80?"...":"")+'</div>'+
+              (r.resumoIA ? '<div class="list-row-sub" style="color:var(--purple);font-size:11.5px;margin-top:2px;">'+icon("bulb")+' '+r.resumoIA.slice(0,100)+(r.resumoIA.length>100?"...":"")+'</div>' : '')+
+            '</div>'+
+            '<button class="icon-btn" data-edit-ref="'+r.id+'" title="Editar">'+icon("edit")+'</button>'+
+            '<button class="icon-btn" data-del-ref="'+r.id+'" title="Excluir">'+icon("trash")+'</button>'+
+          '</div>';
+        }).join("");
+    }).join("");
+}
+
+function renderAlimentacaoAnalise(){
+  if (!state.alimentacaoAnaliseView) state.alimentacaoAnaliseView = { tipo:"semana", offset:0, dataInicio:null, dataFim:null };
+  const { start, end, label } = getPeriodoAtual("alimentacaoAnaliseView");
+  const refs = refeicoesDoPeriodo(start, end);
+  const nDias = Math.max(1, Math.round((new Date(isoDate(end))-new Date(isoDate(start)))/86400000)+1);
+
+  if (!refs.length) return renderPeriodSelector("alimentacaoAnaliseView")+'<div class="empty-state">Sem refeições no período para analisar.</div>';
+
+  // Totais do período
+  const totalCal = refs.reduce(function(a,r){ return a+(r.calorias||0); }, 0);
+  const totalProt = refs.reduce(function(a,r){ return a+(r.proteinas||0); }, 0);
+  const totalCarbs = refs.reduce(function(a,r){ return a+(r.carbs||0); }, 0);
+  const totalGord = refs.reduce(function(a,r){ return a+(r.gorduras||0); }, 0);
+  const mediaCal = totalCal/nDias;
+  const mediaProt = totalProt/nDias;
+
+  // Gasto estimado e déficit
+  const gastoEstimado = gastoCaloricoEstimado();
+  const bio = (typeof bioMaisRecente==="function") ? bioMaisRecente() : null;
+  const metaProt = bio ? Math.round(bio.pesoKg*2.0) : null; // 2g/kg como meta de ganho massa
+
+  const deficitDia = gastoEstimado ? gastoEstimado - mediaCal : null;
+  const statusCalorico = deficitDia===null ? null : deficitDia>150 ? "déficit" : deficitDia<-150 ? "superávit" : "equilíbrio";
+  const corStatus = statusCalorico==="déficit"?"var(--warning)":statusCalorico==="superávit"?"var(--danger)":"var(--success)";
+
+  return renderPeriodSelector("alimentacaoAnaliseView")+
+
+    '<div class="grid grid-4" style="margin-bottom:24px;">'+
+      metricCard("Calorias/dia", Math.round(mediaCal).toLocaleString("pt-BR")+" kcal") +
+      metricCard("Proteína/dia", mediaProt.toFixed(0)+"g"+(metaProt?" / meta "+metaProt+"g":"")) +
+      metricCard("Gasto estimado/dia", gastoEstimado?gastoEstimado.toLocaleString("pt-BR")+" kcal":"—") +
+      (statusCalorico ? metricCard("Balanço", (deficitDia>0?"−":"+")+Math.abs(Math.round(deficitDia)).toLocaleString("pt-BR")+" kcal/dia", null, null, corStatus) : metricCard("Balanço","—")) +
+    '</div>'+
+
+    (statusCalorico ?
+      '<div class="insight-row" style="border-color:'+corStatus+';margin-bottom:16px;">'+icon("bulb")+
+        '<span><strong style="color:'+corStatus+';">'+statusCalorico.charAt(0).toUpperCase()+statusCalorico.slice(1)+' calórico de '+Math.abs(Math.round(deficitDia))+' kcal/dia</strong> em relação ao gasto estimado. '+
+        (statusCalorico==="déficit"?'Bom para redução de gordura — monitore a proteína para não perder massa.':
+         statusCalorico==="superávit"?'Acima do gasto: cuidado com o acúmulo de gordura visceral.':
+         'Balanço equilibrado — ajuste conforme o objetivo do ciclo.')+
+        '</span></div>' : '')+
+
+    (metaProt && mediaProt<metaProt*0.9 ?
+      '<div class="insight-row" style="margin-bottom:16px;">'+icon("bulb")+
+        '<span><strong>Proteína abaixo da meta:</strong> média de '+mediaProt.toFixed(0)+'g/dia contra meta de '+metaProt+'g/dia. '+
+        'A Dra. Marina recomenda priorizar fontes proteicas em todas as refeições, especialmente pós-treino.</span></div>' : '')+
+
+    '<div class="section-title">Resumos da equipe por refeição</div>'+
+    (refs.filter(function(r){ return r.resumoIA; }).length===0 ?
+      '<div class="empty-state" style="padding:16px 0;">Nenhuma refeição com parecer da equipe ainda.<br><small>Use "Calcular com IA" ao registrar para obter análises.</small></div>' :
+      refs.filter(function(r){ return r.resumoIA; }).slice(0,10).map(function(r){
+        return '<div class="insight-row">'+icon("bulb")+
+          '<span><strong>'+r.nome+' ('+new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})+')</strong> — '+r.resumoIA+'</span></div>';
+      }).join("")
+    );
+}
+
+function renderAlimentacao(){
+  if (!state.alimentacaoTab) state.alimentacaoTab = "registro";
+  if (!state.alimentacaoView) state.alimentacaoView = { tipo:"semana", offset:0, dataInicio:null, dataFim:null };
+  const tabs = [
+    {id:"registro", label:"Registrar"},
+    {id:"historico", label:"Histórico"},
+    {id:"analise",   label:"Análise"}
+  ];
+  const conteudo =
+    state.alimentacaoTab==="historico" ? renderAlimentacaoHistorico() :
+    state.alimentacaoTab==="analise"   ? renderAlimentacaoAnalise() :
+    renderAlimentacaoRegistro();
+  return backLink()+
+    '<div class="page-header"><div class="page-title">Alimentação</div></div>'+
+    tabsHtml(tabs, state.alimentacaoTab, "alimentacaotab")+
+    '<div id="alimentacao-content">'+conteudo+'</div>';
+}
+
 function renderLeituras(){
   if (!state.leiturasTab) state.leiturasTab = "registro";
   const tabs = [{id:"registro",label:"Adicionar livro"},{id:"historico",label:"Minha lista"},{id:"analise",label:"Análises"}];
@@ -2632,6 +2804,7 @@ function render(){
       if (msgEl && msgEl.style.display==="flex") setTimeout(function(){ if(msgEl) msgEl.style.display="none"; },2500);
     }
   }
+  else if (state.view === "alimentacao") { content.innerHTML = renderAlimentacao(); }
   else if (state.view === "leituras") { content.innerHTML = renderLeituras(); if (state.leiturasTab==="analise") setTimeout(drawLivrosChart,0); }
   else if (state.view === "analises") { state.view = "dashboard"; content.innerHTML = renderDashboard(); setTimeout(drawCruzadoChart,0); }
   else if (state.view === "exercicios") {
@@ -3049,7 +3222,20 @@ async function executarRegistrosChatCentral(registros){
         const salvo = await DB.upsertMomento(novoMomento);
         if (salvo) state.momentos.push(salvo);
       }
-      // modulo alimentacao: será implementado quando o módulo completo for criado
+      else if (r.modulo === "alimentacao" && r.dados) {
+        const d = r.dados;
+        const ref = {
+          data: d.data||hoje, nome: d.refeicao||d.nome||"Refeição",
+          horario: d.horario||null, descricao: d.descricao||null,
+          calorias: d.totais?d.totais.calorias:d.calorias||null,
+          proteinas: d.totais?d.totais.proteinas:d.proteinas||null,
+          carbs: d.totais?d.totais.carbs:d.carbs||null,
+          gorduras: d.totais?d.totais.gorduras:d.gorduras||null,
+          resumoIA: null
+        };
+        const salvo = await DB.upsertRefeicao(ref);
+        if (salvo) state.refeicoes.push(salvo);
+      }
     } catch(e) {
       console.error("Erro ao executar registro", r.modulo, e);
     }
@@ -3271,6 +3457,96 @@ function attachHandlers(){
     });
   });
   if (backLinkEl) backLinkEl.addEventListener("click", function(e){ e.preventDefault(); state.view = "inicio"; render(); });
+
+  // ── Alimentação ────────────────────────────────────────
+  document.querySelectorAll("[data-alimentacaotab]").forEach(function(btn){
+    btn.addEventListener("click", function(){ state.alimentacaoTab = btn.getAttribute("data-alimentacaotab"); render(); });
+  });
+
+  const btnCalcIA = document.getElementById("btn-al-calcular-ia");
+  if (btnCalcIA) {
+    btnCalcIA.addEventListener("click", async function(){
+      const descricao = document.getElementById("al-descricao") ? document.getElementById("al-descricao").value.trim() : "";
+      const nome = document.getElementById("al-nome") ? document.getElementById("al-nome").value.trim() : "";
+      if (!descricao) { alert("Descreva os alimentos antes de calcular."); return; }
+      const loadingEl = document.getElementById("al-ia-loading");
+      if (loadingEl) loadingEl.style.display = "block";
+      btnCalcIA.disabled = true;
+      try {
+        const bio = (typeof bioMaisRecente==="function") ? bioMaisRecente() : null;
+        const prompt = "Você é a Dra. Marina (Nutricionista Esportiva) da equipe do Cássio Nazaré.\n"+
+          (bio ? "Dados do Cássio: "+bio.pesoKg+"kg, "+bio.massaMuscularEsqueleticaKg+"kg músculo, BMR "+bio.bmrKcal+"kcal.\n" : "")+
+          "Analise esta refeição \""+nome+"\" e retorne APENAS um JSON válido, sem markdown:\n"+
+          '{ "calorias": 0, "proteinas": 0, "carbs": 0, "gorduras": 0, "resumo_ia": "Parecer de 1-2 frases sobre esta refeição no contexto do Cássio." }\n'+
+          "Refeição: "+descricao;
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}] })
+        });
+        const data = await resp.json();
+        const raw = data.content && data.content[0] ? data.content[0].text : "";
+        const clean = raw.replace(/```json|```/g,"").trim();
+        const parsed = JSON.parse(clean);
+        if (document.getElementById("al-calorias")) document.getElementById("al-calorias").value = parsed.calorias||0;
+        if (document.getElementById("al-proteinas")) document.getElementById("al-proteinas").value = parsed.proteinas||0;
+        if (document.getElementById("al-carbs")) document.getElementById("al-carbs").value = parsed.carbs||0;
+        if (document.getElementById("al-gorduras")) document.getElementById("al-gorduras").value = parsed.gorduras||0;
+        state.alimentacaoResumoIA = parsed.resumo_ia||"";
+      } catch(e) { alert("Erro ao calcular com IA. Tente novamente."); }
+      finally { if (loadingEl) loadingEl.style.display="none"; btnCalcIA.disabled=false; }
+    });
+  }
+
+  const btnAlSalvar = document.getElementById("btn-al-salvar");
+  if (btnAlSalvar) {
+    btnAlSalvar.addEventListener("click", async function(){
+      const dataVal = document.getElementById("al-data").value;
+      const nome = document.getElementById("al-nome").value.trim();
+      if (!dataVal || !nome) { alert("Informe a data e o nome da refeição."); return; }
+      btnAlSalvar.disabled = true;
+      const ed = state.alimentacaoEditando;
+      const ref = {
+        id: ed ? ed.id : undefined, data:dataVal, nome,
+        horario: document.getElementById("al-horario").value||null,
+        descricao: document.getElementById("al-descricao").value.trim()||null,
+        calorias: parseFloat(document.getElementById("al-calorias").value)||null,
+        proteinas: parseFloat(document.getElementById("al-proteinas").value)||null,
+        carbs: parseFloat(document.getElementById("al-carbs").value)||null,
+        gorduras: parseFloat(document.getElementById("al-gorduras").value)||null,
+        resumoIA: state.alimentacaoResumoIA || (ed?ed.resumoIA:null) || null
+      };
+      const salvo = await DB.upsertRefeicao(ref);
+      if (salvo) {
+        if (ed) state.refeicoes = state.refeicoes.filter(function(r){ return r.id!==ed.id; });
+        state.refeicoes.push(salvo);
+      }
+      state.alimentacaoEditando = null;
+      state.alimentacaoResumoIA = null;
+      state.alimentacaoTab = "historico";
+      render();
+    });
+  }
+
+  const btnAlCancelar = document.getElementById("btn-al-cancelar");
+  if (btnAlCancelar) btnAlCancelar.addEventListener("click", function(){ state.alimentacaoEditando=null; state.alimentacaoTab="historico"; render(); });
+
+  document.querySelectorAll("[data-edit-ref]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      const id = btn.getAttribute("data-edit-ref");
+      state.alimentacaoEditando = state.refeicoes.find(function(r){ return r.id===id; });
+      state.alimentacaoTab = "registro";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-del-ref]").forEach(function(btn){
+    btn.addEventListener("click", async function(){
+      const id = btn.getAttribute("data-del-ref");
+      await DB.deleteRefeicao(id);
+      state.refeicoes = state.refeicoes.filter(function(r){ return r.id!==id; });
+      render();
+    });
+  });
 
   document.querySelectorAll("[data-sonotab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.sonoTab = btn.getAttribute("data-sonotab"); state.sonoCochiloMode = null; render(); }); });
   document.querySelectorAll("[data-celulartab]").forEach(function(btn){ btn.addEventListener("click", function(){ state.celularTab = btn.getAttribute("data-celulartab"); render(); }); });
