@@ -3122,13 +3122,21 @@ async function enviarChatCentral(){
   setTimeout(function(){ const msgs = document.getElementById("chat-msgs"); if (msgs) msgs.scrollTop = msgs.scrollHeight; }, 50);
 
   try {
+    let systemPrompt = "";
+    try {
+      systemPrompt = gerarSystemPromptCentralIA();
+    } catch(sysErr) {
+      console.error("Erro no system prompt:", sysErr);
+      systemPrompt = "Você é a Central IA, equipe multidisciplinar do Cássio. Responda em JSON: {\"especialista\":\"Equipe Central IA\",\"resposta\":\"...\",\"perguntas\":[],\"registros\":[]}";
+    }
+
     const response = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 2000,
-        system: gerarSystemPromptCentralIA(),
+        system: systemPrompt,
         messages: historico
       })
     });
@@ -3162,10 +3170,12 @@ async function enviarChatCentral(){
       hora: new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
     });
   } catch(err) {
+    console.error("Erro no chat Central IA:", err);
     state.chatCentralIA = state.chatCentralIA.filter(function(m){ return m.idx !== loadingIdx; });
     state.chatCentralIA.push({
       role:"assistant", idx:Date.now(),
-      resposta:"Não consegui me conectar à equipe. Verifique sua conexão e tente novamente.",
+      especialista:"Sistema",
+      resposta:"⚠️ Erro ao contatar a equipe: " + (err && err.message ? err.message : String(err)) + ". Verifique o console (F12) para mais detalhes.",
       perguntas:[], registros:[], confirmado:false, ignorado:false,
       hora: new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
     });
