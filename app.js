@@ -3067,7 +3067,7 @@ function gerarSystemPromptEquipe(equipe){
 // Chama a Edge Function anthropic-proxy com retentativa automática em caso de
 // sobrecarga temporária (503) ou limite de taxa (429) do provedor de IA.
 async function chamarProxyIA(body, tentativas){
-  tentativas = tentativas || 3;
+  tentativas = tentativas || 4;
   let ultimaResposta = null;
   for (let i = 0; i < tentativas; i++){
     const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
@@ -3077,8 +3077,9 @@ async function chamarProxyIA(body, tentativas){
     });
     ultimaResposta = resp;
     if ((resp.status === 503 || resp.status === 429) && i < tentativas - 1){
-      console.log("⏳ Provedor de IA sobrecarregado (status " + resp.status + "), tentando de novo em 2s... (tentativa " + (i+2) + "/" + tentativas + ")");
-      await new Promise(function(r){ setTimeout(r, 2000); });
+      const espera = 3000 * Math.pow(2, i); // 3s, 6s, 12s...
+      console.log("⏳ Provedor de IA sobrecarregado (status " + resp.status + "), tentando de novo em " + (espera/1000) + "s... (tentativa " + (i+2) + "/" + tentativas + ")");
+      await new Promise(function(r){ setTimeout(r, espera); });
       continue;
     }
     return resp;
@@ -3156,7 +3157,8 @@ async function enviarChatCentral(){
       model: "claude-sonnet-4-6",
       max_tokens: 2000,
       system: systemPrompt,
-      messages: historico
+      messages: historico,
+      responseFormat: "json"
     });
     const data = await response.json();
     console.log("🔍 Status HTTP:", response.status, "| Resposta anthropic-proxy:", data);
@@ -3505,7 +3507,7 @@ function attachHandlers(){
           "Analise esta refeição \""+nome+"\" e retorne APENAS um JSON válido, sem markdown:\n"+
           '{ "calorias": 0, "proteinas": 0, "carbs": 0, "gorduras": 0, "resumo_ia": "Parecer de 1-2 frases sobre esta refeição no contexto do Cássio." }\n'+
           "Refeição: "+descricao;
-        const resp = await chamarProxyIA({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}] });
+        const resp = await chamarProxyIA({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}], responseFormat:"json" });
         const data = await resp.json();
         const raw = data.content && data.content[0] ? data.content[0].text : "";
         const clean = raw.replace(/```json|```/g,"").trim();
