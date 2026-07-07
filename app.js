@@ -3132,7 +3132,7 @@ async function enviarChatCentral(){
 
     const response = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 2000,
@@ -3313,7 +3313,7 @@ function attachHandlers(){
         const systemPrompt = gerarSystemPromptEquipe(equipe);
         const response = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
           body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, system: systemPrompt, messages: state.analiseIAHistorico })
         });
         const data = await response.json();
@@ -3492,7 +3492,7 @@ function attachHandlers(){
           '{ "calorias": 0, "proteinas": 0, "carbs": 0, "gorduras": 0, "resumo_ia": "Parecer de 1-2 frases sobre esta refeição no contexto do Cássio." }\n'+
           "Refeição: "+descricao;
         const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
-          method:"POST", headers:{"Content-Type":"application/json"},
+          method:"POST", headers:{"Content-Type":"application/json", "Authorization": "Bearer sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq"},
           body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}] })
         });
         const data = await resp.json();
