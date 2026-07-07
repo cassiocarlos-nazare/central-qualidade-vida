@@ -3466,6 +3466,7 @@ function attachHandlers(){
       }
     });
   });
+  const backLinkEl = document.getElementById("backLink");
   if (backLinkEl) backLinkEl.addEventListener("click", function(e){ e.preventDefault(); state.view = "inicio"; render(); });
 
   // ── Alimentação ────────────────────────────────────────
