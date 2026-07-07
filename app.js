@@ -3141,12 +3141,13 @@ async function enviarChatCentral(){
       })
     });
     const data = await response.json();
+    console.log("🔍 Status HTTP:", response.status, "| Resposta anthropic-proxy:", data);
     const rawText = (data.content && data.content[0]) ? data.content[0].text : null;
 
     // Remove loading
     state.chatCentralIA = state.chatCentralIA.filter(function(m){ return m.idx !== loadingIdx; });
 
-    if (!rawText) throw new Error("Resposta vazia");
+    if (!rawText) throw new Error("Resposta vazia. Status: " + response.status + ". Ver JSON completo logado acima no console.");
 
     let parsed;
     try {
