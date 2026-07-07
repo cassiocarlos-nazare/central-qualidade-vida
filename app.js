@@ -224,10 +224,10 @@ async function loadData(){
 
     const jornadasJaCarregadas = parametrosSalvos && parametrosSalvos.carga_jornadas_feita;
     if (!jornadasJaCarregadas) {
-      const contagem = await DB.contarJornadas();
+      const contagem = await DB.contarPropositos();
       if (contagem === 0) {
         const jornadasInicial = JORNADAS_IMPORT.map(function(j){ return { nome: j.nome, descricao: j.descricao }; });
-        const ok = await DB.bulkInsertJornadas(jornadasInicial);
+        const ok = await DB.bulkInsertPropositos(jornadasInicial);
         if (ok) await DB.setParametro("carga_jornadas_feita", true);
       } else {
         await DB.setParametro("carga_jornadas_feita", true);
@@ -237,7 +237,7 @@ async function loadData(){
     const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap,
       habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas, refeicoes] = await Promise.all([
       DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas(),
-      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getJornadas(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoJornadas(), DB.getRefeicoes()
+      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getPropositos(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoPropositos(), DB.getRefeicoes()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -4094,7 +4094,7 @@ function attachHandlers(){
       const jornadasSel = state.momentoFormJornadasSel || [];
       await DB.setMomentoPessoas(salvo.id, pessoasSel);
       await DB.setMomentoTags(salvo.id, tagsSel);
-      await DB.setMomentoJornadas(salvo.id, jornadasSel);
+      await DB.setMomentoPropositos(salvo.id, jornadasSel);
       state.momentoPessoas = state.momentoPessoas.filter(function(mp){ return mp.momento_id!==salvo.id; }).concat(pessoasSel.map(function(pid){ return { momento_id: salvo.id, pessoa_id: pid }; }));
       state.momentoTags = state.momentoTags.filter(function(mt){ return mt.momento_id!==salvo.id; }).concat(tagsSel.map(function(tid){ return { momento_id: salvo.id, tag_id: tid }; }));
       state.momentoJornadas = state.momentoJornadas.filter(function(mj){ return mj.momento_id!==salvo.id; }).concat(jornadasSel.map(function(jid){ return { momento_id: salvo.id, jornada_id: jid }; }));
