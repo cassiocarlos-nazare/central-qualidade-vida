@@ -3064,6 +3064,28 @@ function gerarSystemPromptEquipe(equipe){
 // CENTRAL IA — Lógica de envio e execução de registros
 // ══════════════════════════════════════════════════════════
 
+// Chama a Edge Function anthropic-proxy com retentativa automática em caso de
+// sobrecarga temporária (503) ou limite de taxa (429) do provedor de IA.
+async function chamarProxyIA(body, tentativas){
+  tentativas = tentativas || 3;
+  let ultimaResposta = null;
+  for (let i = 0; i < tentativas; i++){
+    const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
+      body: JSON.stringify(body)
+    });
+    ultimaResposta = resp;
+    if ((resp.status === 503 || resp.status === 429) && i < tentativas - 1){
+      console.log("⏳ Provedor de IA sobrecarregado (status " + resp.status + "), tentando de novo em 2s... (tentativa " + (i+2) + "/" + tentativas + ")");
+      await new Promise(function(r){ setTimeout(r, 2000); });
+      continue;
+    }
+    return resp;
+  }
+  return ultimaResposta;
+}
+
 async function enviarChatCentral(){
   const chatInput = document.getElementById("chat-input");
   if (!chatInput) return;
@@ -3130,15 +3152,11 @@ async function enviarChatCentral(){
       systemPrompt = "Você é a Central IA, equipe multidisciplinar do Cássio. Responda em JSON: {\"especialista\":\"Equipe Central IA\",\"resposta\":\"...\",\"perguntas\":[],\"registros\":[]}";
     }
 
-    const response = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: historico
-      })
+    const response = await chamarProxyIA({
+      model: "claude-sonnet-4-6",
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: historico
     });
     const data = await response.json();
     console.log("🔍 Status HTTP:", response.status, "| Resposta anthropic-proxy:", data);
@@ -3311,11 +3329,7 @@ function attachHandlers(){
       try {
         const equipe = state.analiseIAEquipe || "sono";
         const systemPrompt = gerarSystemPromptEquipe(equipe);
-        const response = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
-          body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, system: systemPrompt, messages: state.analiseIAHistorico })
-        });
+        const response = await chamarProxyIA({ model: "claude-sonnet-4-6", max_tokens: 1000, system: systemPrompt, messages: state.analiseIAHistorico });
         const data = await response.json();
         const resposta = data.content && data.content[0] ? data.content[0].text : "Não foi possível obter resposta.";
         state.analiseIAHistorico.push({ role: "assistant", content: resposta });
@@ -3491,10 +3505,7 @@ function attachHandlers(){
           "Analise esta refeição \""+nome+"\" e retorne APENAS um JSON válido, sem markdown:\n"+
           '{ "calorias": 0, "proteinas": 0, "carbs": 0, "gorduras": 0, "resumo_ia": "Parecer de 1-2 frases sobre esta refeição no contexto do Cássio." }\n'+
           "Refeição: "+descricao;
-        const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
-          method:"POST", headers:{"Content-Type":"application/json", "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq"},
-          body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}] })
-        });
+        const resp = await chamarProxyIA({ model:"claude-sonnet-4-6", max_tokens:400, messages:[{role:"user",content:prompt}] });
         const data = await resp.json();
         const raw = data.content && data.content[0] ? data.content[0].text : "";
         const clean = raw.replace(/```json|```/g,"").trim();
