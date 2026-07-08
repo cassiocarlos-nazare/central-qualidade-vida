@@ -649,15 +649,15 @@ Object.assign(DB, {
     const { data, error } = await sb.from("lembretes").select("*").order("criado_em", { ascending: false });
     if (error) { console.error("Erro ao buscar lembretes:", error); return []; }
     return data.map(function(r){
-      return { id:r.id, texto:r.texto, dataInicio:r.data_inicio, diasTotal:r.dias_total!=null?Number(r.dias_total):null, ativo:r.ativo };
+      return { id:r.id, texto:r.texto, dataInicio:r.data_inicio, diasTotal:r.dias_total!=null?Number(r.dias_total):null, dataHora:r.data_hora, ativo:r.ativo };
     });
   },
   async upsertLembrete(reg){
     const row = { id:(reg.id&&reg.id.length===36)?reg.id:undefined, texto:reg.texto, data_inicio:reg.dataInicio,
-      dias_total:reg.diasTotal!=null?reg.diasTotal:null, ativo:reg.ativo!==false };
+      dias_total:reg.diasTotal!=null?reg.diasTotal:null, data_hora:reg.dataHora||null, ativo:reg.ativo!==false };
     const { data, error } = await sb.from("lembretes").upsert(row).select().single();
     if (error) { console.error("Erro ao salvar lembrete:", error); return null; }
-    return { id:data.id, texto:data.texto, dataInicio:data.data_inicio, diasTotal:data.dias_total!=null?Number(data.dias_total):null, ativo:data.ativo };
+    return { id:data.id, texto:data.texto, dataInicio:data.data_inicio, diasTotal:data.dias_total!=null?Number(data.dias_total):null, dataHora:data.data_hora, ativo:data.ativo };
   },
   async deleteLembrete(id){
     const { error } = await sb.from("lembretes").delete().eq("id", id);

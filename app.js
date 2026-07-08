@@ -67,6 +67,10 @@ let state = {
   momentoTags: [],
   momentoJornadas: [],
   refeicoes: [],
+  consumoAgua: [],
+  lembretes: [],
+  chatCentralIA: [],
+  chatImagensPendentes: [],
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -264,6 +268,7 @@ async function loadData(){
     state.consumoAgua = consumoAgua;
     state.lembretes = lembretes;
     state.dbOnline = true;
+    inserirSaudacaoProativaCarolSeAplicavel();
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
     state.dbOnline = false;
@@ -677,6 +682,55 @@ function gerarResumoDadosCompleto(dias){
   return linhas.join("\n");
 }
 
+function gerarSaudacaoProativaCarol(){
+  const partes = [];
+  const agora = new Date();
+  const hojeMeiaNoite = new Date(); hojeMeiaNoite.setHours(0,0,0,0);
+  const hojeIso = new Date().toISOString().slice(0,10);
+
+  // Compromissos com data/hora marcada
+  (state.lembretes||[]).filter(function(l){ return l.ativo && l.dataHora; }).forEach(function(l){
+    const dh = new Date(l.dataHora);
+    const dhDiaIso = dh.toISOString().slice(0,10);
+    if (dh < agora && dhDiaIso !== hojeIso) {
+      partes.push("⚠️ Isso venceu e ainda está pendente: **"+l.texto+"** (era "+dh.toLocaleDateString("pt-BR")+" às "+dh.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})+")");
+    } else if (dhDiaIso === hojeIso) {
+      partes.push("📅 Hoje às "+dh.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})+": **"+l.texto+"**");
+    }
+  });
+
+  // Tratamentos/prazos por contagem de dias
+  (state.lembretes||[]).filter(function(l){ return l.ativo && !l.dataHora && l.diasTotal; }).forEach(function(l){
+    const inicio = new Date(l.dataInicio+"T00:00:00");
+    const diaAtual = Math.floor((hojeMeiaNoite-inicio)/86400000)+1;
+    if (diaAtual <= l.diasTotal) partes.push("💊 Dia "+diaAtual+" de "+l.diasTotal+": **"+l.texto+"**");
+  });
+
+  // Rotina: hábitos de hoje ainda pendentes
+  if (typeof habitosAplicaveisNoDia==="function" && typeof registroHabitoNoDia==="function") {
+    const aplicaveis = habitosAplicaveisNoDia(hojeIso);
+    const pendentes = aplicaveis.filter(function(h){ return !registroHabitoNoDia(h.id, hojeIso); });
+    if (aplicaveis.length && pendentes.length) {
+      partes.push("✅ Da sua rotina de hoje, ainda faltam: "+pendentes.slice(0,6).map(function(h){return h.nome;}).join(", ")+(pendentes.length>6?" e mais "+(pendentes.length-6)+"...":""));
+    }
+  }
+
+  if (!partes.length) return null;
+  return partes.join("\n");
+}
+
+function inserirSaudacaoProativaCarolSeAplicavel(){
+  if (state.chatCentralIA && state.chatCentralIA.length) return; // só na conversa vazia
+  const resumo = gerarSaudacaoProativaCarol();
+  if (!resumo) return;
+  const hora = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  state.chatCentralIA = [{
+    role:"assistant", especialista:"Carol · Secretária Executiva",
+    resposta:"Bom dia, Cássio! Passando pra te atualizar:\n\n"+resumo+"\n\nQualquer coisa, é só me chamar. 😊",
+    perguntas:[], registros:[], confirmado:true, idx:Date.now(), hora
+  }];
+}
+
 function gerarSystemPromptCentralIA(){
   const hoje = new Date().toISOString().slice(0,10);
   const ontem = new Date(Date.now()-86400000).toISOString().slice(0,10);
@@ -801,6 +855,12 @@ Receba mensagens livres do Cássio (texto, prints, imagens de refeições, dados
       "acao": "inserir",
       "dados": { "texto": "Tratamento H Pylori (medicação 1)", "dataInicio": "YYYY-MM-DD", "diasTotal": 14 },
       "resumo": "Lembrete: Tratamento H Pylori, 14 dias"
+    },
+    {
+      "modulo": "lembrete",
+      "acao": "inserir",
+      "dados": { "texto": "Consulta com nutricionista", "dataHora": "YYYY-MM-DDTHH:MM:00" },
+      "resumo": "Lembrete: Consulta com nutricionista em DD/MM às HH:MM"
     }
   ]
 }
@@ -811,7 +871,8 @@ REGRAS:
 - Prints de sono: extraia horários, total, real, score com atenção — pergunte se algo não estiver claro na imagem
 - Alimentos: use tabelas brasileiras de composição nutricional; para produtos com marca mencione a marca no cálculo
 - Água: quando o Cássio mencionar quantidade de água bebida (ex: "bebi mais 500ml", "tomei 2 copos d'água"), registre no módulo "agua" como um incremento (campo "ml"), não como total do dia — o sistema soma automaticamente ao total já registrado hoje. 1 copo ≈ 200ml se não especificado.
-- Lembretes/tratamentos com contagem de dias: quando o Cássio mencionar algo como "dia X de um tratamento/prazo de Y dias" ou pedir para ser lembrado de algo por um período, registre no módulo "lembrete". Use "dataInicio" como a data de início real do que ele descreveu (calcule a partir de "hoje" menos os dias já passados, se ele disser "dia 3 de 14", dataInicio = hoje - 2 dias). Se não houver prazo definido, omita "diasTotal".
+- Lembretes com CONTAGEM DE DIAS (tratamentos, prazos de vários dias): use "diasTotal" e "dataInicio". Se ele disser "dia 3 de 14", calcule dataInicio = hoje - 2 dias.
+- Lembretes com DATA E HORA ESPECÍFICA (compromissos, consultas, reuniões, "quero ser lembrado disso"): use "dataHora" no formato "YYYY-MM-DDTHH:MM:00", NÃO use diasTotal nesse caso. Sempre que o Cássio mencionar algo com data/horário marcado, ou pedir explicitamente para ser avisado/lembrado de algo, crie este registro — a Carol vai proativamente trazer isso de volta para ele no dia certo.
 - Não crie registros com dados incompletos — use "perguntas" para buscar o que falta
 - Hoje é ${hoje}. Ontem é ${ontem}
 - Responda SOMENTE o JSON válido. Sem texto fora do JSON, sem markdown, sem blocos de código`;
@@ -3500,7 +3561,7 @@ async function executarRegistrosChatCentral(registros){
       }
       else if (r.modulo === "lembrete" && r.dados) {
         const d = r.dados;
-        const reg = { texto:d.texto||"Lembrete", dataInicio:d.dataInicio||hoje, diasTotal:d.diasTotal||null, ativo:true };
+        const reg = { texto:d.texto||"Lembrete", dataInicio:d.dataInicio||hoje, diasTotal:d.diasTotal||null, dataHora:d.dataHora||null, ativo:true };
         const salvo = await DB.upsertLembrete(reg);
         if (salvo) state.lembretes.push(salvo);
       }
@@ -3632,6 +3693,29 @@ function attachHandlers(){
     });
   }
 
+  // Redimensiona/comprime a imagem no navegador antes de anexar (fotos de celular
+  // costumam vir enormes — isso acelera o envio e evita estourar limites da API)
+  function comprimirImagem(dataUrl, maxDim, qualidade){
+    maxDim = maxDim || 1600; qualidade = qualidade || 0.82;
+    return new Promise(function(resolve){
+      const img = new Image();
+      img.onload = function(){
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h*maxDim/w); w = maxDim; }
+          else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", qualidade));
+      };
+      img.onerror = function(){ resolve(dataUrl); }; // se falhar, usa a original
+      img.src = dataUrl;
+    });
+  }
+
   // Preview das imagens anexadas (suporta múltiplas)
   function renderPreviewImagensPendentes(){
     if (!chatExtras) return;
@@ -3662,9 +3746,11 @@ function attachHandlers(){
       files.forEach(function(file){
         const reader = new FileReader();
         reader.onload = function(ev){
-          state.chatImagensPendentes.push(ev.target.result);
-          pendentes--;
-          if (pendentes === 0) { renderPreviewImagensPendentes(); chatFileInput.value = ""; }
+          comprimirImagem(ev.target.result).then(function(comprimida){
+            state.chatImagensPendentes.push(comprimida);
+            pendentes--;
+            if (pendentes === 0) { renderPreviewImagensPendentes(); chatFileInput.value = ""; }
+          });
         };
         reader.readAsDataURL(file);
       });
@@ -3684,6 +3770,7 @@ function attachHandlers(){
   if (btnLimpar) btnLimpar.addEventListener("click", function(){
     state.chatCentralIA = [];
     state.chatImagensPendentes = [];
+    inserirSaudacaoProativaCarolSeAplicavel();
     render();
   });
 
