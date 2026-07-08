@@ -235,9 +235,11 @@ async function loadData(){
     }
 
     const [sono, celular, livros, exercicios, bioimpedancia, pesos, movimentacao, celularDiario, semanasFechadasCelularMap,
-      habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas, refeicoes] = await Promise.all([
+      habitos, registrosHabitos, anotacoesDia, pessoas, tagsMomentos, jornadas, momentos, momentoPessoas, momentoTags, momentoJornadas, refeicoes,
+      consumoAgua, lembretes] = await Promise.all([
       DB.getSono(), DB.getCelular(), DB.getLivros(), DB.getExercicios(), DB.getBioimpedancia(), DB.getPeso(), DB.getMovimentacao(), DB.getCelularDiario(), DB.getSemanasFechadas(),
-      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getPropositos(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoPropositos(), DB.getRefeicoes()
+      DB.getHabitos(), DB.getRegistrosHabitos(), DB.getAnotacoesDia(), DB.getPessoas(), DB.getTagsMomentos(), DB.getPropositos(), DB.getMomentos(), DB.getMomentoPessoas(), DB.getMomentoTags(), DB.getMomentoPropositos(), DB.getRefeicoes(),
+      DB.getConsumoAgua(), DB.getLembretes()
     ]);
     state.registrosSono = sono;
     state.registrosCelular = celular;
@@ -259,6 +261,8 @@ async function loadData(){
     state.momentoTags = momentoTags;
     state.momentoJornadas = momentoJornadas;
     state.refeicoes = refeicoes;
+    state.consumoAgua = consumoAgua;
+    state.lembretes = lembretes;
     state.dbOnline = true;
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -712,6 +716,18 @@ Receba mensagens livres do Cássio (texto, prints, imagens de refeições, dados
         "totais": { "calorias": 200, "proteinas": 9, "carbs": 32, "gorduras": 3.5 }
       },
       "resumo": "Café da manhã: 200kcal · 9g prot · 32g carb · 3,5g gord"
+    },
+    {
+      "modulo": "agua",
+      "acao": "inserir",
+      "dados": { "data": "YYYY-MM-DD", "ml": 500 },
+      "resumo": "Água: +500ml"
+    },
+    {
+      "modulo": "lembrete",
+      "acao": "inserir",
+      "dados": { "texto": "Tratamento H Pylori (medicação 1)", "dataInicio": "YYYY-MM-DD", "diasTotal": 14 },
+      "resumo": "Lembrete: Tratamento H Pylori, 14 dias"
     }
   ]
 }
@@ -721,9 +737,29 @@ REGRAS:
 - Se a mensagem mistura temas (sono + alimentação), a equipe responde integrada e assina com "Equipe Central IA"
 - Prints de sono: extraia horários, total, real, score com atenção — pergunte se algo não estiver claro na imagem
 - Alimentos: use tabelas brasileiras de composição nutricional; para produtos com marca mencione a marca no cálculo
+- Água: quando o Cássio mencionar quantidade de água bebida (ex: "bebi mais 500ml", "tomei 2 copos d'água"), registre no módulo "agua" como um incremento (campo "ml"), não como total do dia — o sistema soma automaticamente ao total já registrado hoje. 1 copo ≈ 200ml se não especificado.
+- Lembretes/tratamentos com contagem de dias: quando o Cássio mencionar algo como "dia X de um tratamento/prazo de Y dias" ou pedir para ser lembrado de algo por um período, registre no módulo "lembrete". Use "dataInicio" como a data de início real do que ele descreveu (calcule a partir de "hoje" menos os dias já passados, se ele disser "dia 3 de 14", dataInicio = hoje - 2 dias). Se não houver prazo definido, omita "diasTotal".
 - Não crie registros com dados incompletos — use "perguntas" para buscar o que falta
 - Hoje é ${hoje}. Ontem é ${ontem}
 - Responda SOMENTE o JSON válido. Sem texto fora do JSON, sem markdown, sem blocos de código`;
+}
+
+function renderLembretesBanner(){
+  const ativos = (state.lembretes||[]).filter(function(l){ return l.ativo; });
+  if (!ativos.length) return "";
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  return '<div class="chat-lembretes" style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px;">'+
+    ativos.map(function(l){
+      const inicio = new Date(l.dataInicio+"T00:00:00");
+      const diaAtual = Math.floor((hoje-inicio)/86400000)+1;
+      const concluido = l.diasTotal && diaAtual > l.diasTotal;
+      const progresso = l.diasTotal ? "Dia "+Math.min(diaAtual,l.diasTotal)+" de "+l.diasTotal : "Dia "+diaAtual;
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;">'+
+        '<span>'+icon("bulb")+' <strong>'+progresso+(concluido?" · concluído":"")+':</strong> '+l.texto+'</span>'+
+        '<button class="icon-btn" data-lembrete-concluir="'+l.id+'" title="Concluir/remover lembrete">'+icon("check")+'</button>'+
+      '</div>';
+    }).join("")+
+  '</div>';
 }
 
 function renderDiaAtual(){
@@ -831,6 +867,7 @@ function renderDiaAtual(){
           '</div>'+
           '<button class="btn btn-ghost" id="btn-chat-limpar" style="font-size:12px;opacity:0.5;">Limpar conversa</button>'+
         '</div>'+
+        renderLembretesBanner()+
         '<div class="chat-msgs" id="chat-msgs">'+msgsHTML+'</div>'+
         '<div class="chat-input-area">'+
           '<div class="chat-input-extras" id="chat-input-extras"></div>'+
@@ -1898,6 +1935,9 @@ function renderAlimentacaoAnalise(){
         '<span><strong>Proteína abaixo da meta:</strong> média de '+mediaProt.toFixed(0)+'g/dia contra meta de '+metaProt+'g/dia. '+
         'A Dra. Marina recomenda priorizar fontes proteicas em todas as refeições, especialmente pós-treino.</span></div>' : '')+
 
+    '<div class="section-title">Detalhamento diário</div>'+
+    renderTabelaDiariaAlimentacao(refs, gastoEstimado) +
+
     '<div class="section-title">Resumos da equipe por refeição</div>'+
     (refs.filter(function(r){ return r.resumoIA; }).length===0 ?
       '<div class="empty-state" style="padding:16px 0;">Nenhuma refeição com parecer da equipe ainda.<br><small>Use "Calcular com IA" ao registrar para obter análises.</small></div>' :
@@ -1906,6 +1946,66 @@ function renderAlimentacaoAnalise(){
           '<span><strong>'+r.nome+' ('+new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})+')</strong> — '+r.resumoIA+'</span></div>';
       }).join("")
     );
+}
+
+function renderTabelaDiariaAlimentacao(refs, gastoEstimado){
+  const porData = {};
+  refs.forEach(function(r){ if (!porData[r.data]) porData[r.data]=[]; porData[r.data].push(r); });
+  const dias = Object.keys(porData).sort(function(a,b){ return b.localeCompare(a); });
+  if (!dias.length) return '<div class="empty-state" style="padding:16px 0;">Sem dados no período.</div>';
+  return '<div style="overflow-x:auto;margin-bottom:24px;">'+
+    '<table class="tabela-simples" style="width:100%;border-collapse:collapse;font-size:13px;">'+
+    '<thead><tr style="text-align:left;color:var(--text-faint);border-bottom:1px solid var(--border);">'+
+      '<th style="padding:8px 6px;">Dia</th><th style="padding:8px 6px;">Kcal</th><th style="padding:8px 6px;">Proteína</th>'+
+      '<th style="padding:8px 6px;">Carbs</th><th style="padding:8px 6px;">Gordura</th><th style="padding:8px 6px;">Balanço</th>'+
+    '</tr></thead><tbody>'+
+    dias.map(function(data){
+      const refsNoDia = porData[data];
+      const t = totaisDiaAlimentacao(refsNoDia);
+      const dataFmt = new Date(data+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"2-digit"});
+      const balanco = gastoEstimado ? gastoEstimado - t.calorias : null;
+      const corBal = balanco===null ? "var(--text-dim)" : balanco>150 ? "var(--warning)" : balanco<-150 ? "var(--danger)" : "var(--success)";
+      return '<tr style="border-bottom:1px solid var(--border);">'+
+        '<td style="padding:8px 6px;">'+dataFmt+'</td>'+
+        '<td style="padding:8px 6px;font-family:var(--font-mono);">'+Math.round(t.calorias)+'</td>'+
+        '<td style="padding:8px 6px;font-family:var(--font-mono);">'+t.proteinas.toFixed(0)+'g</td>'+
+        '<td style="padding:8px 6px;font-family:var(--font-mono);">'+t.carbs.toFixed(0)+'g</td>'+
+        '<td style="padding:8px 6px;font-family:var(--font-mono);">'+t.gorduras.toFixed(0)+'g</td>'+
+        '<td style="padding:8px 6px;font-family:var(--font-mono);color:'+corBal+';">'+(balanco===null?"—":(balanco>0?"−":"+")+Math.abs(Math.round(balanco)))+'</td>'+
+      '</tr>';
+    }).join("")+
+    '</tbody></table></div>';
+}
+
+function consumoAguaHoje(){
+  const hoje = new Date().toISOString().slice(0,10);
+  const r = (state.consumoAgua||[]).find(function(c){ return c.data===hoje; });
+  return r ? r.mlTotal : 0;
+}
+
+async function adicionarAgua(ml){
+  const hoje = new Date().toISOString().slice(0,10);
+  const atual = (state.consumoAgua||[]).find(function(c){ return c.data===hoje; });
+  const novoTotal = Math.max(0, (atual?atual.mlTotal:0) + ml);
+  const salvo = await DB.upsertConsumoAgua({ id: atual?atual.id:undefined, data: hoje, mlTotal: novoTotal });
+  if (salvo) {
+    state.consumoAgua = (state.consumoAgua||[]).filter(function(c){ return c.data!==hoje; });
+    state.consumoAgua.push(salvo);
+    render();
+  }
+}
+
+function renderWidgetAgua(){
+  const ml = consumoAguaHoje();
+  return '<div class="card" style="margin-bottom:20px;padding:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">'+
+    '<div><div style="font-size:12px;color:var(--text-faint);">Água hoje</div>'+
+    '<div style="font-size:22px;font-weight:600;">'+ml.toLocaleString("pt-BR")+'ml <span style="font-size:13px;color:var(--text-dim);font-weight:400;">('+(ml/1000).toFixed(1)+' L)</span></div></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
+      '<button class="btn btn-ghost" data-agua-add="200">+200ml</button>'+
+      '<button class="btn btn-ghost" data-agua-add="300">+300ml</button>'+
+      '<button class="btn btn-ghost" data-agua-add="500">+500ml</button>'+
+      '<button class="icon-btn" id="btn-agua-reset" title="Zerar água de hoje">'+icon("trash")+'</button>'+
+    '</div></div>';
 }
 
 function renderAlimentacao(){
@@ -1922,6 +2022,7 @@ function renderAlimentacao(){
     renderAlimentacaoRegistro();
   return backLink()+
     '<div class="page-header"><div class="page-title">Alimentação</div></div>'+
+    renderWidgetAgua()+
     tabsHtml(tabs, state.alimentacaoTab, "alimentacaotab")+
     '<div id="alimentacao-content">'+conteudo+'</div>';
 }
@@ -2183,7 +2284,7 @@ function calcDuracaoAtividade(horaInicio, horaFim){
 function movPorData(data){ return state.movimentacao.find(function(m){ return m.data===data; }) || null; }
 
 function exerAtividadeGetPeriodo(){
-  if (!state.atividadeView) state.atividadeView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
+  if (!state.atividadeView) state.atividadeView = { tipo: "semana", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
   return getPeriodoAtual("atividadeView");
 }
 
@@ -2200,7 +2301,7 @@ function renderFiltroAtividade(){
 }
 
 function renderAnaliseExercicios(){
-  if (!state.atividadeView) state.atividadeView = { tipo: "mes", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
+  if (!state.atividadeView) state.atividadeView = { tipo: "semana", offset: 0, dataInicio: null, dataFim: null, filtroTipo: "" };
   const { start, end } = exerAtividadeGetPeriodo();
   const startIso = isoDate(start), endIso = isoDate(end);
   const filtroTipo = state.atividadeView.filtroTipo;
@@ -2238,7 +2339,42 @@ function renderAnaliseExercicios(){
     '</div>'+
     '<div class="chart-wrap" style="height:220px;"><canvas id="chartExerciciosTipo" role="img" aria-label="Gráfico de frequência por tipo de exercício"></canvas></div>'+
     '<div class="section-title">Observações</div>'+
-    insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("");
+    insights.map(function(d){ return '<div class="insight-row">'+icon("bulb")+'<span>'+d+'</span></div>'; }).join("")+
+    '<div class="section-title">Dias no período</div>'+
+    renderCardsExerciciosPeriodo(startIso, endIso, filtroTipo);
+}
+
+function renderCardsExerciciosPeriodo(startIso, endIso, filtroTipo){
+  const datasAtividade = state.exercicios.filter(function(e){ return e.data>=startIso && e.data<=endIso && (!filtroTipo || e.tipo===filtroTipo); }).map(function(e){ return e.data; });
+  const datasMov = filtroTipo ? [] : state.movimentacao.filter(function(m){ return m.data>=startIso && m.data<=endIso; }).map(function(m){ return m.data; });
+  const todasDatas = Array.from(new Set([...datasAtividade, ...datasMov])).sort().reverse();
+  if (!todasDatas.length) return '<div class="empty-state" style="padding:16px 0;">Nenhuma atividade registrada neste período.</div>';
+
+  return todasDatas.map(function(data){
+    const dataFmt = new Date(data+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",weekday:"short"});
+    const atividadesDoDia = state.exercicios.filter(function(e){ return e.data===data && (!filtroTipo || e.tipo===filtroTipo); });
+    const mov = filtroTipo ? null : movPorData(data);
+
+    const detalhesAtividade = atividadesDoDia.map(function(e){
+      const dur = calcDuracaoAtividade(e.horaInicio, e.horaFim);
+      return e.tipo+(e.horaInicio&&e.horaFim?" ("+e.horaInicio+"–"+e.horaFim+(dur?", "+fmtHoras(dur):"")+")":"");
+    }).join(" · ");
+
+    const detalhesMov = [];
+    if (mov) {
+      if (mov.passos) detalhesMov.push(mov.passos.toLocaleString("pt-BR")+" passos");
+      if (mov.minutosAtivo) detalhesMov.push(mov.minutosAtivo+" min ativo");
+      if (mov.caloriasTotais) detalhesMov.push(mov.caloriasTotais+" kcal");
+      if (mov.distanciaKm) detalhesMov.push(mov.distanciaKm+" km");
+    }
+
+    return '<div class="list-row" style="flex-wrap:wrap;"><div class="list-row-main">'+
+      '<div class="list-row-title">'+dataFmt+'</div>'+
+      (detalhesAtividade?'<div class="list-row-sub" style="font-family:var(--font-body);color:var(--purple);">'+detalhesAtividade+'</div>':'')+
+      (detalhesMov.length?'<div class="list-row-sub" style="font-family:var(--font-body);">'+detalhesMov.join(" · ")+'</div>':'')+
+      (!detalhesAtividade && !detalhesMov.length ? '<div class="list-row-sub" style="color:var(--text-faint);">Sem detalhes registrados.</div>' : '')+
+      '</div></div>';
+  }).join("");
 }
 
 function renderRegistroAtividadeForm(){
@@ -2324,8 +2460,8 @@ function renderExerciciosTab(){
 }
 
 function renderExercicios(){
-  if (!state.exerciciosSecao) state.exerciciosSecao = "bioimpedancia";
-  const secoes = [{id:"bioimpedancia",label:"Bioimpedância"},{id:"peso",label:"Peso"},{id:"atividade",label:"Atividade física"}];
+  if (!state.exerciciosSecao) state.exerciciosSecao = "atividade";
+  const secoes = [{id:"atividade",label:"Atividade física"},{id:"peso",label:"Peso"},{id:"bioimpedancia",label:"Bioimpedância"}];
   return backLink() +
     '<div class="page-header"><div class="page-title">Exercícios físicos</div></div>'+
     tabsHtml(secoes, state.exerciciosSecao, "exerciciosecao") +
@@ -2790,7 +2926,13 @@ function render(){
       '<button class="btn btn-primary" style="margin-top:16px;" onclick="location.reload()">Tentar novamente</button>';
     return;
   }
-  if (state.view === "diaAtual") content.innerHTML = renderDiaAtual();
+  if (state.view === "diaAtual") {
+    const chatMsgsAntigo = document.getElementById("chat-msgs");
+    const scrollAntigo = chatMsgsAntigo ? chatMsgsAntigo.scrollTop : null;
+    content.innerHTML = renderDiaAtual();
+    const chatMsgsNovo = document.getElementById("chat-msgs");
+    if (chatMsgsNovo && scrollAntigo !== null) chatMsgsNovo.scrollTop = scrollAntigo;
+  }
   else if (state.view === "dashboard") { content.innerHTML = renderDashboard(); setTimeout(drawCruzadoChart,0); }
   else if (state.view === "analiseIA") content.innerHTML = renderAnaliseIA();
   else if (state.view === "inicio") content.innerHTML = renderInicio();
@@ -3255,17 +3397,43 @@ async function executarRegistrosChatCentral(registros){
       }
       else if (r.modulo === "alimentacao" && r.dados) {
         const d = r.dados;
+        const descricaoDeItens = Array.isArray(d.itens) && d.itens.length
+          ? d.itens.map(function(it){ return (it.item||"") + (it.quantidade?" ("+it.quantidade+")":""); }).join(", ")
+          : null;
+        const totais = d.totais || (Array.isArray(d.itens) ? {
+          calorias: d.itens.reduce(function(s,it){ return s + (Number(it.calorias)||0); }, 0),
+          proteinas: d.itens.reduce(function(s,it){ return s + (Number(it.proteinas)||0); }, 0),
+          carbs: d.itens.reduce(function(s,it){ return s + (Number(it.carbs)||0); }, 0),
+          gorduras: d.itens.reduce(function(s,it){ return s + (Number(it.gorduras)||0); }, 0)
+        } : null);
         const ref = {
           data: d.data||hoje, nome: d.refeicao||d.nome||"Refeição",
-          horario: d.horario||null, descricao: d.descricao||null,
-          calorias: d.totais?d.totais.calorias:d.calorias||null,
-          proteinas: d.totais?d.totais.proteinas:d.proteinas||null,
-          carbs: d.totais?d.totais.carbs:d.carbs||null,
-          gorduras: d.totais?d.totais.gorduras:d.gorduras||null,
+          horario: d.horario||null, descricao: d.descricao || descricaoDeItens || null,
+          calorias: totais?totais.calorias:d.calorias||null,
+          proteinas: totais?totais.proteinas:d.proteinas||null,
+          carbs: totais?totais.carbs:d.carbs||null,
+          gorduras: totais?totais.gorduras:d.gorduras||null,
           resumoIA: null
         };
         const salvo = await DB.upsertRefeicao(ref);
         if (salvo) state.refeicoes.push(salvo);
+      }
+      else if (r.modulo === "agua" && r.dados) {
+        const d = r.dados;
+        const dataAlvo = d.data||hoje;
+        const atual = (state.consumoAgua||[]).find(function(c){ return c.data===dataAlvo; });
+        const novoTotal = Math.max(0, (atual?atual.mlTotal:0) + (Number(d.ml)||0));
+        const salvo = await DB.upsertConsumoAgua({ id: atual?atual.id:undefined, data: dataAlvo, mlTotal: novoTotal });
+        if (salvo) {
+          state.consumoAgua = (state.consumoAgua||[]).filter(function(c){ return c.data!==dataAlvo; });
+          state.consumoAgua.push(salvo);
+        }
+      }
+      else if (r.modulo === "lembrete" && r.dados) {
+        const d = r.dados;
+        const reg = { texto:d.texto||"Lembrete", dataInicio:d.dataInicio||hoje, diasTotal:d.diasTotal||null, ativo:true };
+        const salvo = await DB.upsertLembrete(reg);
+        if (salvo) state.lembretes.push(salvo);
       }
     } catch(e) {
       console.error("Erro ao executar registro", r.modulo, e);
@@ -3274,6 +3442,24 @@ async function executarRegistrosChatCentral(registros){
 }
 
 function attachHandlers(){
+  document.querySelectorAll("[data-lembrete-concluir]").forEach(function(btn){
+    btn.addEventListener("click", async function(){
+      const id = btn.getAttribute("data-lembrete-concluir");
+      const l = (state.lembretes||[]).find(function(x){ return x.id===id; });
+      if (!l) return;
+      const salvo = await DB.upsertLembrete({ id:l.id, texto:l.texto, dataInicio:l.dataInicio, diasTotal:l.diasTotal, ativo:false });
+      if (salvo) { state.lembretes = state.lembretes.filter(function(x){ return x.id!==id; }); state.lembretes.push(salvo); render(); }
+    });
+  });
+
+  document.querySelectorAll("[data-agua-add]").forEach(function(btn){
+    btn.addEventListener("click", function(){ adicionarAgua(Number(btn.getAttribute("data-agua-add"))); });
+  });
+  const btnAguaReset = document.getElementById("btn-agua-reset");
+  if (btnAguaReset) btnAguaReset.addEventListener("click", function(){
+    if (confirm("Zerar o registro de água de hoje?")) adicionarAgua(-consumoAguaHoje());
+  });
+
   document.querySelectorAll("[data-nav]").forEach(function(btn){
     btn.addEventListener("click", function(e){
       e.preventDefault();

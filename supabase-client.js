@@ -629,5 +629,39 @@ Object.assign(DB, {
     const { error } = await sb.from("refeicoes").delete().eq("id", id);
     if (error) { console.error("Erro ao excluir refeição:", error); return false; }
     return true;
+  },
+
+  // ── Consumo de água ───────────────────────────────────
+  async getConsumoAgua(){
+    const { data, error } = await sb.from("consumo_agua").select("*").order("data", { ascending: false });
+    if (error) { console.error("Erro ao buscar consumo de água:", error); return []; }
+    return data.map(function(r){ return { id:r.id, data:r.data, mlTotal:Number(r.ml_total||0) }; });
+  },
+  async upsertConsumoAgua(reg){
+    const row = { id:(reg.id&&reg.id.length===36)?reg.id:undefined, data:reg.data, ml_total:reg.mlTotal||0, atualizado_em: new Date().toISOString() };
+    const { data, error } = await sb.from("consumo_agua").upsert(row, { onConflict: "data" }).select().single();
+    if (error) { console.error("Erro ao salvar consumo de água:", error); return null; }
+    return { id:data.id, data:data.data, mlTotal:Number(data.ml_total||0) };
+  },
+
+  // ── Lembretes / tarefas com contagem de dias ──────────
+  async getLembretes(){
+    const { data, error } = await sb.from("lembretes").select("*").order("criado_em", { ascending: false });
+    if (error) { console.error("Erro ao buscar lembretes:", error); return []; }
+    return data.map(function(r){
+      return { id:r.id, texto:r.texto, dataInicio:r.data_inicio, diasTotal:r.dias_total!=null?Number(r.dias_total):null, ativo:r.ativo };
+    });
+  },
+  async upsertLembrete(reg){
+    const row = { id:(reg.id&&reg.id.length===36)?reg.id:undefined, texto:reg.texto, data_inicio:reg.dataInicio,
+      dias_total:reg.diasTotal!=null?reg.diasTotal:null, ativo:reg.ativo!==false };
+    const { data, error } = await sb.from("lembretes").upsert(row).select().single();
+    if (error) { console.error("Erro ao salvar lembrete:", error); return null; }
+    return { id:data.id, texto:data.texto, dataInicio:data.data_inicio, diasTotal:data.dias_total!=null?Number(data.dias_total):null, ativo:data.ativo };
+  },
+  async deleteLembrete(id){
+    const { error } = await sb.from("lembretes").delete().eq("id", id);
+    if (error) { console.error("Erro ao excluir lembrete:", error); return false; }
+    return true;
   }
 });
