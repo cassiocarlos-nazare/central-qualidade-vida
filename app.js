@@ -3358,8 +3358,18 @@ async function chamarProxyIA(body, tentativas){
     });
     ultimaResposta = resp;
     if ((resp.status === 503 || resp.status === 429) && i < tentativas - 1){
-      const espera = 3000 * Math.pow(2, i); // 3s, 6s, 12s...
-      console.log("⏳ Provedor de IA sobrecarregado (status " + resp.status + "), tentando de novo em " + (espera/1000) + "s... (tentativa " + (i+2) + "/" + tentativas + ")");
+      let espera;
+      if (resp.status === 429) {
+        // Limite de taxa: usa o tempo exato que o Gemini sugeriu (mais uma folga de 2s),
+        // em vez de adivinhar — evita novas tentativas que só piorariam o limite.
+        try {
+          const dados = await resp.clone().json();
+          espera = dados.retryAfterSeconds ? (dados.retryAfterSeconds*1000 + 2000) : 20000;
+        } catch(e) { espera = 20000; }
+      } else {
+        espera = 3000 * Math.pow(2, i); // sobrecarga (503): 3s, 6s, 12s...
+      }
+      console.log("⏳ Provedor de IA limitado (status " + resp.status + "), tentando de novo em " + Math.round(espera/1000) + "s... (tentativa " + (i+2) + "/" + tentativas + ")");
       await new Promise(function(r){ setTimeout(r, espera); });
       continue;
     }
