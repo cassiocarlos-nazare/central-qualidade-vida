@@ -607,6 +607,76 @@ function pulseRing(score){
 // CENTRAL IA — Chat multidisciplinar (tela principal)
 // ══════════════════════════════════════════════════════════
 
+function gerarResumoDadosCompleto(dias){
+  dias = dias || 7;
+  const hoje = new Date().toISOString().slice(0,10);
+  const desdeDate = new Date(); desdeDate.setDate(desdeDate.getDate()-(dias-1));
+  const desde = desdeDate.toISOString().slice(0,10);
+  const linhas = [];
+
+  // Sono
+  const sonoPeriodo = (state.registrosSono||[]).filter(function(r){ return r.grupoData>=desde && r.grupoData<=hoje; });
+  if (sonoPeriodo.length) {
+    const horas = sonoPeriodo.map(function(r){ return r.horasSonoReal||calcDuracao(r.dormiu,r.acordou)||0; }).filter(Boolean);
+    const scores = sonoPeriodo.map(function(r){ return r.scoreOriginal; }).filter(function(s){ return s!=null; });
+    linhas.push("SONO (últimos "+dias+" dias): média "+(horas.length?fmtHoras(avg(horas)):"?")+" real"+(scores.length?", score médio "+Math.round(avg(scores)):"")+". Detalhe: "+
+      sonoPeriodo.map(function(r){ return r.grupoData+" ("+fmtHoras(r.horasSonoReal||0)+", score "+(r.scoreOriginal||"?")+")"; }).join(", ")+".");
+  } else linhas.push("SONO: sem registros nos últimos "+dias+" dias.");
+
+  // Alimentação
+  const refsPeriodo = (state.refeicoes||[]).filter(function(r){ return r.data>=desde && r.data<=hoje; });
+  if (refsPeriodo.length) {
+    const porDia = {};
+    refsPeriodo.forEach(function(r){ if(!porDia[r.data]) porDia[r.data]={cal:0,prot:0}; porDia[r.data].cal+=(r.calorias||0); porDia[r.data].prot+=(r.proteinas||0); });
+    const dias_ = Object.keys(porDia);
+    linhas.push("ALIMENTAÇÃO (últimos "+dias+" dias): média "+Math.round(avg(dias_.map(function(d){return porDia[d].cal;})))+" kcal/dia e "+
+      Math.round(avg(dias_.map(function(d){return porDia[d].prot;})))+"g proteína/dia, em "+dias_.length+" dia(s) com registro.");
+  } else linhas.push("ALIMENTAÇÃO: sem refeições registradas nos últimos "+dias+" dias.");
+
+  // Atividade física / movimentação
+  const exPeriodo = (state.exercicios||[]).filter(function(e){ return e.data>=desde && e.data<=hoje; });
+  const movPeriodo = (state.movimentacao||[]).filter(function(m){ return m.data>=desde && m.data<=hoje; });
+  const passosArr = movPeriodo.map(function(m){ return m.passos||0; }).filter(Boolean);
+  linhas.push("ATIVIDADE FÍSICA (últimos "+dias+" dias): "+exPeriodo.length+" atividade(s) registrada(s)"+
+    (exPeriodo.length?" — "+exPeriodo.map(function(e){return e.data+" "+e.tipo;}).join(", "):"")+
+    ". Passos/dia (média): "+(passosArr.length?Math.round(avg(passosArr)).toLocaleString("pt-BR"):"sem dados")+".");
+
+  // Bioimpedância / peso
+  const bio = typeof bioMaisRecente==="function" ? bioMaisRecente() : null;
+  if (bio) linhas.push("BIOIMPEDÂNCIA mais recente ("+(bio.dataMedicao||"").toString().slice(0,10)+"): "+bio.pesoKg+"kg, gordura "+bio.relacaoGorduraPct+"%, músculo "+bio.massaMuscularEsqueleticaKg+"kg, gordura visceral nível "+bio.gorduraVisceral+", BMR "+bio.bmrKcal+"kcal.");
+
+  // Hábitos — consistência real no período
+  if (state.habitos && state.habitos.length && typeof habitosAplicaveisNoDia==="function" && typeof registroHabitoNoDia==="function") {
+    let totalAplic=0, totalCumpr=0;
+    for (let i=0;i<dias;i++){
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const diso = d.toISOString().slice(0,10);
+      habitosAplicaveisNoDia(diso).forEach(function(h){
+        totalAplic++;
+        if (registroHabitoNoDia(h.id, diso)) totalCumpr++;
+      });
+    }
+    linhas.push("HÁBITOS: consistência de "+(totalAplic?Math.round(100*totalCumpr/totalAplic):0)+"% nos últimos "+dias+" dias ("+totalCumpr+"/"+totalAplic+" cumpridos).");
+  }
+
+  // Água
+  const aguaPeriodo = (state.consumoAgua||[]).filter(function(c){ return c.data>=desde && c.data<=hoje; });
+  if (aguaPeriodo.length) linhas.push("ÁGUA: média "+Math.round(avg(aguaPeriodo.map(function(c){return c.mlTotal;})))+"ml/dia (nos dias com registro).");
+
+  // Lembretes ativos (tratamentos, prazos)
+  const lembretesAtivos = (state.lembretes||[]).filter(function(l){ return l.ativo; });
+  if (lembretesAtivos.length) {
+    const hojeD = new Date(); hojeD.setHours(0,0,0,0);
+    linhas.push("LEMBRETES/PRAZOS ATIVOS: "+lembretesAtivos.map(function(l){
+      const inicio = new Date(l.dataInicio+"T00:00:00");
+      const diaAtual = Math.floor((hojeD-inicio)/86400000)+1;
+      return l.texto+" (dia "+diaAtual+(l.diasTotal?" de "+l.diasTotal:"")+")";
+    }).join("; ")+".");
+  }
+
+  return linhas.join("\n");
+}
+
 function gerarSystemPromptCentralIA(){
   const hoje = new Date().toISOString().slice(0,10);
   const ontem = new Date(Date.now()-86400000).toISOString().slice(0,10);
@@ -671,6 +741,9 @@ ${sonoOntem.length ? `- Sono de ontem: ${sonoOntem.map(function(r){return (r.hor
 ${movOntem ? `- Movimentação de ontem: ${movOntem.passos||0} passos · ${(movOntem.distanciaKm||0).toFixed(1)}km · ${movOntem.caloriasTotais||0}kcal totais` : "- Sem movimentação de ontem"}
 ${habitosHoje.length ? `- Hábitos configurados pra hoje: ${habitosHoje.map(function(h){return h.nome;}).join(", ")}` : "- Sem hábitos configurados para hoje"}
 ${livrosLendo.length ? `- Livros em leitura: ${livrosLendo.map(function(l){return l.titulo+(l.autor?" ("+l.autor+")":"");}).join(", ")}` : ""}
+
+RESUMO DE DADOS REAIS DOS ÚLTIMOS 7 DIAS (use estes números concretos sempre que o Cássio pedir uma análise, parecer, "como estou indo" ou comparação — NUNCA responda de forma genérica quando esses dados existirem):
+${gerarResumoDadosCompleto(7)}
 
 SUA MISSÃO:
 Receba mensagens livres do Cássio (texto, prints, imagens de refeições, dados de sono). Interprete, extraia dados, e SEMPRE responda em JSON com este formato exato:
@@ -783,7 +856,9 @@ function renderDiaAtual(){
         if (m.role === "user") {
           return '<div class="chat-msg chat-msg-user">'+
             '<div class="chat-msg-bubble chat-msg-bubble-user">'+
-              (m.imagem ? '<img src="'+m.imagem+'" style="max-width:100%;border-radius:8px;margin-bottom:8px;" /><br>' : '')+
+              (m.imagens && m.imagens.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">'+
+                m.imagens.map(function(src){ return '<img src="'+src+'" style="max-width:140px;max-height:140px;border-radius:8px;object-fit:cover;" />'; }).join("")+
+              '</div>' : '')+
               m.texto+
             '</div>'+
             '<div class="chat-msg-meta">Você · '+m.hora+'</div>'+
@@ -874,7 +949,7 @@ function renderDiaAtual(){
           '<div class="chat-input-row">'+
             '<label class="chat-btn-anexo" title="Anexar imagem (print de sono, refeição, etc.)">'+
               icon("photo")+
-              '<input type="file" id="chat-file-input" accept="image/*" style="display:none;">'+
+              '<input type="file" id="chat-file-input" accept="image/*" multiple style="display:none;">'+
             '</label>'+
             '<textarea class="chat-textarea" id="chat-input" placeholder="Fale com sua equipe... sono, refeições, treino, momentos do dia" rows="1"></textarea>'+
             '<button class="btn btn-primary chat-btn-enviar" id="chat-btn-enviar">'+icon("check")+'</button>'+
@@ -3181,7 +3256,8 @@ function gerarSystemPromptEquipe(equipe){
       "DADOS ATUAIS DO SISTEMA:\n"+
       "- Meta de sono: "+fmtHoras(state.parametros.metaHorasSono||7.5)+"\n"+
       "- Média últimos 7 dias: "+(mediaSono?fmtHoras(mediaSono):"sem dados")+" \n"+
-      "- Dados de ontem:\n"+dadosSono+"\n";
+      "- Dados de ontem:\n"+dadosSono+"\n\n"+
+      "RESUMO COMPLETO DOS ÚLTIMOS 14 DIAS (use estes dados reais, nunca genéricos):\n"+gerarResumoDadosCompleto(14)+"\n";
   }
 
   if (equipe === "exercicios") {
@@ -3195,11 +3271,13 @@ function gerarSystemPromptEquipe(equipe){
       "DADOS ATUAIS DO SISTEMA:\n"+
       (bio ? "- Bioimpedância mais recente ("+bio.dataMedicao+"): peso "+bio.pesoKg+"kg, gordura "+bio.relacaoGorduraPct+"%, músculo "+bio.massaMuscularEsqueleticaKg+"kg, gordura visceral nível "+bio.gorduraVisceral+", BMR "+bio.bmrKcal+" kcal\n" : "- Sem bioimpedância cadastrada ainda.\n")+
       (movOntem ? "- Movimentação de ontem: "+movOntem.passos+" passos, "+(movOntem.distanciaKm||0).toFixed(1)+"km, "+(movOntem.caloriasTotais||0)+" kcal totais\n" : "- Sem dados de movimentação de ontem.\n")+
-      "- Rotina: musculação seg-sex 6:20-7:40, futebol society seg noite, natação qua ou qui, futebol de campo sáb.\n";
+      "- Rotina: musculação seg-sex 6:20-7:40, futebol society seg noite, natação qua ou qui, futebol de campo sáb.\n\n"+
+      "RESUMO COMPLETO DOS ÚLTIMOS 14 DIAS (use estes dados reais, nunca genéricos):\n"+gerarResumoDadosCompleto(14)+"\n";
   }
 
   // Fallback genérico
-  return perfil+"Você é um assistente especializado na Central de Qualidade de Vida do Cássio. Ajude com base nos dados disponíveis.";
+  return perfil+"Você é um assistente especializado na Central de Qualidade de Vida do Cássio. Ajude com base nos dados disponíveis abaixo — nunca dê respostas genéricas quando houver dados reais.\n\n"+
+    "RESUMO COMPLETO DOS ÚLTIMOS 14 DIAS:\n"+gerarResumoDadosCompleto(14);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3233,12 +3311,12 @@ async function enviarChatCentral(){
   const chatInput = document.getElementById("chat-input");
   if (!chatInput) return;
   const texto = chatInput.value.trim();
-  const imagem = state.chatImagemPendente || null;
-  if (!texto && !imagem) return;
+  const imagens = (state.chatImagensPendentes && state.chatImagensPendentes.length) ? state.chatImagensPendentes.slice() : null;
+  if (!texto && !imagens) return;
 
   chatInput.value = "";
   chatInput.style.height = "auto";
-  state.chatImagemPendente = null;
+  state.chatImagensPendentes = [];
   const chatExtras = document.getElementById("chat-input-extras");
   if (chatExtras) chatExtras.innerHTML = "";
   const fileInput = document.getElementById("chat-file-input");
@@ -3246,7 +3324,7 @@ async function enviarChatCentral(){
 
   if (!state.chatCentralIA) state.chatCentralIA = [];
   const hora = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-  state.chatCentralIA.push({ role:"user", texto, imagem, hora });
+  state.chatCentralIA.push({ role:"user", texto, imagens, hora });
   render();
 
   // Scroll para o fim
@@ -3255,24 +3333,15 @@ async function enviarChatCentral(){
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
   }, 50);
 
-  // Construir mensagem para a API
-  const userContent = [];
-  if (imagem) {
-    const base64 = imagem.split(",")[1];
-    const mediaType = imagem.split(";")[0].split(":")[1] || "image/jpeg";
-    userContent.push({ type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } });
-  }
-  if (texto) userContent.push({ type:"text", text:texto });
-
   // Histórico para contexto multi-turno (apenas últimas 10 msgs para não explodir o contexto)
   const historico = (state.chatCentralIA||[]).slice(-10).map(function(m){
     if (m.role==="user") {
       const c = [];
-      if (m.imagem) {
-        const b64 = m.imagem.split(",")[1];
-        const mt = m.imagem.split(";")[0].split(":")[1] || "image/jpeg";
+      (m.imagens||[]).forEach(function(src){
+        const b64 = src.split(",")[1];
+        const mt = src.split(";")[0].split(":")[1] || "image/jpeg";
         c.push({ type:"image", source:{ type:"base64", media_type:mt, data:b64 } });
-      }
+      });
       if (m.texto) c.push({ type:"text", text:m.texto });
       return { role:"user", content: c.length===1 && c[0].type==="text" ? m.texto : c };
     }
@@ -3563,28 +3632,42 @@ function attachHandlers(){
     });
   }
 
-  // Preview imagem anexada
+  // Preview das imagens anexadas (suporta múltiplas)
+  function renderPreviewImagensPendentes(){
+    if (!chatExtras) return;
+    const imgs = state.chatImagensPendentes || [];
+    if (!imgs.length) { chatExtras.innerHTML = ""; return; }
+    chatExtras.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;">'+
+      imgs.map(function(src, i){
+        return '<div style="position:relative;">'+
+          '<img src="'+src+'" style="height:56px;width:56px;border-radius:6px;border:1px solid var(--border);object-fit:cover;" />'+
+          '<button data-remove-img-idx="'+i+'" style="position:absolute;top:-6px;right:-6px;background:var(--danger);border:none;border-radius:50%;width:20px;height:20px;color:#fff;cursor:pointer;line-height:1;">×</button>'+
+        '</div>';
+      }).join("")+
+    '</div>';
+    chatExtras.querySelectorAll("[data-remove-img-idx]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        const idx = Number(btn.getAttribute("data-remove-img-idx"));
+        state.chatImagensPendentes.splice(idx,1);
+        renderPreviewImagensPendentes();
+      });
+    });
+  }
   if (chatFileInput) {
     chatFileInput.addEventListener("change", function(){
-      const file = chatFileInput.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(ev){
-        state.chatImagemPendente = ev.target.result;
-        if (chatExtras) {
-          chatExtras.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;">'+
-            '<img src="'+ev.target.result+'" style="height:56px;border-radius:6px;border:1px solid var(--border);object-fit:cover;" />'+
-            '<span style="font-size:12px;color:var(--text-dim);">'+file.name+'</span>'+
-            '<button id="chat-remove-img" class="icon-btn">'+icon("trash")+'</button>'+
-          '</div>';
-          document.getElementById("chat-remove-img").addEventListener("click", function(){
-            state.chatImagemPendente = null;
-            chatExtras.innerHTML = "";
-            chatFileInput.value = "";
-          });
-        }
-      };
-      reader.readAsDataURL(file);
+      const files = Array.from(chatFileInput.files || []);
+      if (!files.length) return;
+      if (!state.chatImagensPendentes) state.chatImagensPendentes = [];
+      let pendentes = files.length;
+      files.forEach(function(file){
+        const reader = new FileReader();
+        reader.onload = function(ev){
+          state.chatImagensPendentes.push(ev.target.result);
+          pendentes--;
+          if (pendentes === 0) { renderPreviewImagensPendentes(); chatFileInput.value = ""; }
+        };
+        reader.readAsDataURL(file);
+      });
     });
   }
 
@@ -3600,7 +3683,7 @@ function attachHandlers(){
   const btnLimpar = document.getElementById("btn-chat-limpar");
   if (btnLimpar) btnLimpar.addEventListener("click", function(){
     state.chatCentralIA = [];
-    state.chatImagemPendente = null;
+    state.chatImagensPendentes = [];
     render();
   });
 
