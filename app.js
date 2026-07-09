@@ -3453,30 +3453,38 @@ function gerarSystemPromptEquipe(equipe){
 
 // Chama a Edge Function anthropic-proxy com retentativa automática em caso de
 // sobrecarga temporária (503) ou limite de taxa (429) do provedor de IA.
-async function chamarProxyIA(body, tentativas){
-  tentativas = tentativas || 4;
+async function chamarProxyIA(body, tentativasMax503){
+  tentativasMax503 = tentativasMax503 || 4;
+  const tentativasMax429 = 2; // 429 = limite de taxa: retentativas extras só pioram a cota. No máximo 1 nova tentativa.
   let ultimaResposta = null;
-  for (let i = 0; i < tentativas; i++){
+  let tentativas429 = 0;
+  let i = 0;
+  while (true){
     const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/anthropic-proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json", "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" },
       body: JSON.stringify(body)
     });
     ultimaResposta = resp;
-    if ((resp.status === 503 || resp.status === 429) && i < tentativas - 1){
+
+    if (resp.status === 429) {
+      tentativas429++;
+      if (tentativas429 >= tentativasMax429) return resp; // não insiste mais — evita efeito cascata na cota
       let espera;
-      if (resp.status === 429) {
-        // Limite de taxa: usa o tempo exato que o Gemini sugeriu (mais uma folga de 2s),
-        // em vez de adivinhar — evita novas tentativas que só piorariam o limite.
-        try {
-          const dados = await resp.clone().json();
-          espera = dados.retryAfterSeconds ? (dados.retryAfterSeconds*1000 + 2000) : 20000;
-        } catch(e) { espera = 20000; }
-      } else {
-        espera = 3000 * Math.pow(2, i); // sobrecarga (503): 3s, 6s, 12s...
-      }
-      console.log("⏳ Provedor de IA limitado (status " + resp.status + "), tentando de novo em " + Math.round(espera/1000) + "s... (tentativa " + (i+2) + "/" + tentativas + ")");
+      try {
+        const dados = await resp.clone().json();
+        espera = dados.retryAfterSeconds ? (dados.retryAfterSeconds*1000 + 2000) : 20000;
+      } catch(e) { espera = 20000; }
+      console.log("⏳ Limite de taxa (429), uma única retentativa em " + Math.round(espera/1000) + "s...");
       await new Promise(function(r){ setTimeout(r, espera); });
+      continue;
+    }
+
+    if (resp.status === 503 && i < tentativasMax503 - 1){
+      const espera = 3000 * Math.pow(2, i); // sobrecarga (503): 3s, 6s, 12s...
+      console.log("⏳ Provedor de IA sobrecarregado (503), tentando de novo em " + Math.round(espera/1000) + "s... (tentativa " + (i+2) + "/" + tentativasMax503 + ")");
+      await new Promise(function(r){ setTimeout(r, espera); });
+      i++;
       continue;
     }
     return resp;
