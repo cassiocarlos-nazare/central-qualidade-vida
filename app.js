@@ -3015,7 +3015,7 @@ function renderFormHabito(){
     state.habitoRepeteMensalmente = h ? !!h.repeteMensalmente : false;
   }
 
-  return '<div class="card" style="margin-top:16px;">'+
+  return '<div class="card" id="habito-form-container" style="margin-top:16px;">'+
     '<p style="font-size:14px;font-weight:500;margin:0 0 14px;">'+(h?"Editar hábito":"Novo hábito")+'</p>'+
     '<div class="form-grid">'+
     field("Nome do hábito", '<input type="text" id="hf-nome" value="'+nomeAtual+'" placeholder="ex: Meditação" />') +
@@ -4390,6 +4390,10 @@ function attachHandlers(){
     state.habitoFormNome = undefined; state.habitoFormNegativo = undefined; state.habitoFormMetaPercentual = undefined;
     state.habitoCalendarioMesRef = null;
     render();
+    setTimeout(function(){
+      const f = document.getElementById("habito-form-container");
+      if (f) f.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
   });
   document.querySelectorAll("[data-editarhabito]").forEach(function(btn){ btn.addEventListener("click", function(){
     state.habitoEditando = btn.getAttribute("data-editarhabito"); state.habitoFormAberto = true;
@@ -4397,6 +4401,10 @@ function attachHandlers(){
     state.habitoFormNome = undefined; state.habitoFormNegativo = undefined; state.habitoFormMetaPercentual = undefined;
     state.habitoCalendarioMesRef = null;
     render();
+    setTimeout(function(){
+      const f = document.getElementById("habito-form-container");
+      if (f) f.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
   }); });
   const btnCancelarHabito = document.getElementById("btn-cancelar-habito");
   if (btnCancelarHabito) btnCancelarHabito.addEventListener("click", function(){ state.habitoFormAberto = false; render(); });
