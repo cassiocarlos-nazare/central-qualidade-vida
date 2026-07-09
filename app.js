@@ -35,7 +35,7 @@ const MODULES = [
   { id: "sono",      label: "Sono",                icon: "moon",      active: true,  section: "modules" },
   { id: "alimentacao",label: "Alimentação",        icon: "food",      active: true,  section: "modules" },
   { id: "exercicios",label: "Exercícios Físicos",  icon: "run",       active: true,  section: "modules" },
-  { id: "agenda",    label: "Agenda",              icon: "calendar",  active: false, section: "modules" },
+  { id: "agenda",    label: "Agenda",              icon: "calendar",  active: true, section: "modules" },
   { id: "celular",   label: "Uso do Celular",      icon: "phone",     active: true,  section: "modules" },
   { id: "leituras",  label: "Leituras",            icon: "book",      active: true,  section: "modules" },
   { id: "noticias",  label: "Notícias e Resumos",  icon: "news",      active: false, section: "modules" },
@@ -71,6 +71,10 @@ let state = {
   lembretes: [],
   chatCentralIA: [],
   chatImagensPendentes: [],
+  eventosAgenda: [],
+  agendaCarregada: false,
+  agendaCarregando: false,
+  agendaErro: null,
   parametros: { metaHorasSono: 7.5, horaDormirIdeal: "22:30", horaAcordarIdeal: "06:00", metaCelularHoras: 2 },
   sonoView: { tipo: "mes", offset: 0, dataInicio: null, dataFim: null },
   loaded: false
@@ -268,6 +272,7 @@ async function loadData(){
     state.consumoAgua = consumoAgua;
     state.lembretes = lembretes;
     state.dbOnline = true;
+    await carregarEventosAgendaSilencioso();
     inserirSaudacaoProativaCarolSeAplicavel();
   } catch (e) {
     console.error("Falha ao conectar ao banco de dados:", e);
@@ -668,6 +673,19 @@ function gerarResumoDadosCompleto(dias){
   const aguaPeriodo = (state.consumoAgua||[]).filter(function(c){ return c.data>=desde && c.data<=hoje; });
   if (aguaPeriodo.length) linhas.push("ÁGUA: média "+Math.round(avg(aguaPeriodo.map(function(c){return c.mlTotal;})))+"ml/dia (nos dias com registro).");
 
+  // Agenda (Google Calendar)
+  const eventosFuturos = (state.eventosAgenda||[]).filter(function(ev){ return (ev.inicio||"").slice(0,10)>=hoje; }).slice(0,15);
+  if (eventosFuturos.length) {
+    linhas.push("AGENDA (próximos compromissos): "+eventosFuturos.map(function(ev){
+      const d = new Date(ev.inicio);
+      const dataFmt = d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
+      const hora = ev.diaTodo ? "dia todo" : d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+      return dataFmt+" "+hora+": "+ev.titulo;
+    }).join("; ")+".");
+  } else {
+    linhas.push("AGENDA: sem compromissos futuros carregados (ou agenda não sincronizada).");
+  }
+
   // Lembretes ativos (tratamentos, prazos)
   const lembretesAtivos = (state.lembretes||[]).filter(function(l){ return l.ativo; });
   if (lembretesAtivos.length) {
@@ -688,7 +706,13 @@ function gerarSaudacaoProativaCarol(){
   const hojeMeiaNoite = new Date(); hojeMeiaNoite.setHours(0,0,0,0);
   const hojeIso = new Date().toISOString().slice(0,10);
 
-  // Compromissos com data/hora marcada
+  // Compromissos da agenda (Google Calendar) hoje
+  (state.eventosAgenda||[]).filter(function(ev){ return (ev.inicio||"").slice(0,10)===hojeIso; }).forEach(function(ev){
+    const hora = ev.diaTodo ? "dia todo" : new Date(ev.inicio).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+    partes.push("📅 Hoje ("+hora+"): **"+ev.titulo+"**"+(ev.local?" — "+ev.local:""));
+  });
+
+  // Compromissos com data/hora marcada (lembretes internos)
   (state.lembretes||[]).filter(function(l){ return l.ativo && l.dataHora; }).forEach(function(l){
     const dh = new Date(l.dataHora);
     const dhDiaIso = dh.toISOString().slice(0,10);
@@ -894,6 +918,80 @@ function renderLembretesBanner(){
       '</div>';
     }).join("")+
   '</div>';
+}
+
+async function carregarEventosAgendaSilencioso(){
+  try {
+    const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/google-calendar?acao=listar&dias=14", {
+      headers: { "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" }
+    });
+    const data = await resp.json();
+    if (resp.ok && data.eventos) { state.eventosAgenda = data.eventos; state.agendaCarregada = true; }
+  } catch(e) { console.error("Erro ao pré-carregar agenda:", e); }
+}
+
+async function carregarEventosAgenda(){
+  state.agendaCarregando = true;
+  state.agendaErro = null;
+  render();
+  try {
+    const resp = await fetch("https://vrtjmwthsfpdsqjvnjwy.supabase.co/functions/v1/google-calendar?acao=listar&dias=14", {
+      headers: { "apikey": "sb_publishable_xqgk-Pt1O-qsJ9-LItLFtg_TEGSXceq" }
+    });
+    const data = await resp.json();
+    if (resp.ok && data.eventos) {
+      state.eventosAgenda = data.eventos;
+    } else {
+      state.agendaErro = (data.error && (data.error.message || JSON.stringify(data.error))) || "Erro desconhecido ao carregar agenda.";
+    }
+  } catch(e) {
+    state.agendaErro = String(e);
+  }
+  state.agendaCarregada = true;
+  state.agendaCarregando = false;
+  render();
+}
+
+function renderAgenda(){
+  const hojeIso = new Date().toISOString().slice(0,10);
+  const eventos = state.eventosAgenda || [];
+  const porDia = {};
+  eventos.forEach(function(ev){
+    const diaIso = (ev.inicio||"").slice(0,10);
+    if (!porDia[diaIso]) porDia[diaIso] = [];
+    porDia[diaIso].push(ev);
+  });
+  const dias = Object.keys(porDia).sort();
+
+  let conteudo;
+  if (state.agendaCarregando) {
+    conteudo = '<div class="empty-state" style="padding:32px 0;">Carregando compromissos do Google Calendar...</div>';
+  } else if (state.agendaErro) {
+    conteudo = '<div class="empty-state" style="padding:32px 0;color:var(--danger);">Erro ao carregar agenda: '+state.agendaErro+
+      '<br><button class="btn btn-ghost" id="btn-agenda-tentar-novo" style="margin-top:12px;">Tentar de novo</button></div>';
+  } else if (!dias.length) {
+    conteudo = '<div class="empty-state" style="padding:32px 0;">Nenhum compromisso nos próximos 14 dias.</div>';
+  } else {
+    conteudo = dias.map(function(dia){
+      const dataFmt = new Date(dia+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"});
+      const ehHoje = dia === hojeIso;
+      return '<div class="section-title">'+dataFmt+(ehHoje?' · hoje':'')+'</div>'+
+        porDia[dia].map(function(ev){
+          const hora = ev.diaTodo ? "Dia todo" : new Date(ev.inicio).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+          return '<div class="list-row"><div class="list-row-main">'+
+            '<div class="list-row-title">'+hora+' — '+ev.titulo+'</div>'+
+            (ev.local?'<div class="list-row-sub">📍 '+ev.local+'</div>':'')+
+          '</div></div>';
+        }).join("");
+    }).join("");
+  }
+
+  return backLink()+
+    '<div class="page-header"><div class="page-title">Agenda</div>'+
+      '<button class="btn btn-ghost" id="btn-agenda-atualizar" style="font-size:12px;">Atualizar</button>'+
+    '</div>'+
+    '<div style="font-size:12px;color:var(--text-faint);margin-bottom:16px;">Sincronizado com o Google Calendar (cassio.nazare@bravi.com.br)</div>'+
+    conteudo;
 }
 
 function renderDiaAtual(){
@@ -3083,6 +3181,7 @@ function render(){
     }
   }
   else if (state.view === "alimentacao") { content.innerHTML = renderAlimentacao(); }
+  else if (state.view === "agenda") { content.innerHTML = renderAgenda(); if (!state.agendaCarregada) carregarEventosAgenda(); }
   else if (state.view === "leituras") { content.innerHTML = renderLeituras(); if (state.leiturasTab==="analise") setTimeout(drawLivrosChart,0); }
   else if (state.view === "analises") { state.view = "dashboard"; content.innerHTML = renderDashboard(); setTimeout(drawCruzadoChart,0); }
   else if (state.view === "exercicios") {
@@ -3582,6 +3681,11 @@ async function executarRegistrosChatCentral(registros){
 }
 
 function attachHandlers(){
+  const btnAgendaAtualizar = document.getElementById("btn-agenda-atualizar");
+  if (btnAgendaAtualizar) btnAgendaAtualizar.addEventListener("click", carregarEventosAgenda);
+  const btnAgendaTentarNovo = document.getElementById("btn-agenda-tentar-novo");
+  if (btnAgendaTentarNovo) btnAgendaTentarNovo.addEventListener("click", carregarEventosAgenda);
+
   document.querySelectorAll("[data-lembrete-concluir]").forEach(function(btn){
     btn.addEventListener("click", async function(){
       const id = btn.getAttribute("data-lembrete-concluir");
