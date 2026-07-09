@@ -566,6 +566,11 @@ function gerarInsightsCruzados(){
 }
 
 function icon(name){ return ICONS[name] || ""; }
+function iconSized(name, px){
+  px = px || 14;
+  const svg = icon(name);
+  return svg ? svg.replace("<svg ", '<svg width="'+px+'" height="'+px+'" ') : "";
+}
 function el(html){ const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
 
 function renderSidebar(){
@@ -727,7 +732,7 @@ function gerarSaudacaoProativaCarol(){
   (state.lembretes||[]).filter(function(l){ return l.ativo && !l.dataHora && l.diasTotal; }).forEach(function(l){
     const inicio = new Date(l.dataInicio+"T00:00:00");
     const diaAtual = Math.floor((hojeMeiaNoite-inicio)/86400000)+1;
-    if (diaAtual <= l.diasTotal) partes.push("💊 Dia "+diaAtual+" de "+l.diasTotal+": **"+l.texto+"**");
+    if (diaAtual <= l.diasTotal) partes.push("💊 Dia "+diaAtual+" de "+l.diasTotal+": **"+l.texto+"**"+(l.horario?" (aviso diário às "+l.horario+")":""));
   });
 
   // Rotina: hábitos de hoje ainda pendentes
@@ -877,8 +882,8 @@ Receba mensagens livres do Cássio (texto, prints, imagens de refeições, dados
     {
       "modulo": "lembrete",
       "acao": "inserir",
-      "dados": { "texto": "Tratamento H Pylori (medicação 1)", "dataInicio": "YYYY-MM-DD", "diasTotal": 14 },
-      "resumo": "Lembrete: Tratamento H Pylori, 14 dias"
+      "dados": { "texto": "Tratamento H Pylori (medicação 1)", "dataInicio": "YYYY-MM-DD", "diasTotal": 14, "horario": "21:00" },
+      "resumo": "Lembrete: Tratamento H Pylori, 14 dias, aviso diário às 21:00"
     },
     {
       "modulo": "lembrete",
@@ -896,7 +901,8 @@ REGRAS:
 - Alimentos: use tabelas brasileiras de composição nutricional; para produtos com marca mencione a marca no cálculo
 - Água: quando o Cássio mencionar quantidade de água bebida (ex: "bebi mais 500ml", "tomei 2 copos d'água"), registre no módulo "agua" como um incremento (campo "ml"), não como total do dia — o sistema soma automaticamente ao total já registrado hoje. 1 copo ≈ 200ml se não especificado.
 - Lembretes com CONTAGEM DE DIAS (tratamentos, prazos de vários dias): use "diasTotal" e "dataInicio". Se ele disser "dia 3 de 14", calcule dataInicio = hoje - 2 dias.
-- Lembretes com DATA E HORA ESPECÍFICA (compromissos, consultas, reuniões, "quero ser lembrado disso"): use "dataHora" no formato "YYYY-MM-DDTHH:MM:00", NÃO use diasTotal nesse caso. Sempre que o Cássio mencionar algo com data/horário marcado, ou pedir explicitamente para ser avisado/lembrado de algo, crie este registro — a Carol vai proativamente trazer isso de volta para ele no dia certo.
+- Se o Cássio pedir para ser AVISADO/NOTIFICADO todo dia num horário específico sobre algo que já está sendo descrito no MESMO registro (ex: tratamento + "me avisa às 21h"), adicione o campo "horario" (formato "HH:MM") NESSE MESMO registro de lembrete — NUNCA crie um segundo lembrete separado só para o aviso.
+- Lembretes com DATA E HORA ESPECÍFICA (compromissos, consultas, reuniões, evento único que não se repete): use "dataHora" no formato "YYYY-MM-DDTHH:MM:00", NÃO use diasTotal nesse caso.
 - Não crie registros com dados incompletos — use "perguntas" para buscar o que falta
 - Hoje é ${hoje}. Ontem é ${ontem}
 - Responda SOMENTE o JSON válido. Sem texto fora do JSON, sem markdown, sem blocos de código`;
@@ -912,8 +918,9 @@ function renderLembretesBanner(){
       const diaAtual = Math.floor((hoje-inicio)/86400000)+1;
       const concluido = l.diasTotal && diaAtual > l.diasTotal;
       const progresso = l.diasTotal ? "Dia "+Math.min(diaAtual,l.diasTotal)+" de "+l.diasTotal : "Dia "+diaAtual;
+      const sufixoHorario = l.horario ? " · aviso às "+l.horario : "";
       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;">'+
-        '<span>'+icon("bulb")+' <strong>'+progresso+(concluido?" · concluído":"")+':</strong> '+l.texto+'</span>'+
+        '<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:var(--purple);flex-shrink:0;display:inline-flex;">'+iconSized("bulb",14)+'</span><strong>'+progresso+(concluido?" · concluído":"")+sufixoHorario+':</strong> '+l.texto+'</span>'+
         '<button class="icon-btn" data-lembrete-concluir="'+l.id+'" title="Concluir/remover lembrete">'+icon("check")+'</button>'+
       '</div>';
     }).join("")+
@@ -3670,7 +3677,7 @@ async function executarRegistrosChatCentral(registros){
       }
       else if (r.modulo === "lembrete" && r.dados) {
         const d = r.dados;
-        const reg = { texto:d.texto||"Lembrete", dataInicio:d.dataInicio||hoje, diasTotal:d.diasTotal||null, dataHora:d.dataHora||null, ativo:true };
+        const reg = { texto:d.texto||"Lembrete", dataInicio:d.dataInicio||hoje, diasTotal:d.diasTotal||null, dataHora:d.dataHora||null, horario:d.horario||null, ativo:true };
         const salvo = await DB.upsertLembrete(reg);
         if (salvo) state.lembretes.push(salvo);
       }
